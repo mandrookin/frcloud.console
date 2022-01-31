@@ -28,7 +28,7 @@ static inline void *realloc_it(void *ptrmem, size_t size) {
  * The output looks like YAML, but I'm not sure if it's really compatible.
  */
 
-static int dump(const char *js, jsmntok_t *t, size_t count, int indent, char * holder) 
+static int dump(const char *js, jsmntok_t *t, size_t count, int indent, char * holder)
 {
   int i, j, k;
   jsmntok_t *key;

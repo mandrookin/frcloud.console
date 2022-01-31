@@ -55,7 +55,7 @@ static int get_oname_from_cd(char const*const cd, char *oname)
             case FirstNibble:
                 if (isdigit(*val)) ch = (*val - '0');
                 else if ((*val >= 'A' && *val <= 'F')) ch = 0xa + (*val - 'A');
-                else 
+                else
                 {
                     fprintf(stderr, "%s header fornat error\n", unikey);
                     return -2;
@@ -79,7 +79,7 @@ static int get_oname_from_cd(char const*const cd, char *oname)
             }
         }
         *str++ = '\0';
-//        puts(oname);
+        //        puts(oname);
         return ret;
     }
 
@@ -98,12 +98,12 @@ static int get_oname_from_cd(char const*const cd, char *oname)
 
     while (*val != '\0' && *val != ';') {
         /* FR stuff */
-        switch(*val)
+        switch (*val)
         {
-          case '!':
-          case '?':
+        case '!':
+        case '?':
             *val = '_';
-          break;
+            break;
         }
         //printf (".... %c\n", *val);
         *oname++ = *val++;
@@ -116,10 +116,10 @@ bail:
 
 #define ID_BUFF_SIZE  26
 
-static const char const * const modes[3] = { 
-    "\n\x1B[32m\x1B[1mTemplates> \x1B[0m", 
-    "\n\x1B[32m\x1B[1mReports> \x1B[0m", 
-    "\n\x1B[32m\x1B[1mExports> \x1B[0m" 
+static const char const * const modes[3] = {
+    "\n\x1B[32m\x1B[1mTemplates> \x1B[0m",
+    "\n\x1B[32m\x1B[1mReports> \x1B[0m",
+    "\n\x1B[32m\x1B[1mExports> \x1B[0m"
 };
 static int file_body;
 static dnld_params_t dnld_params;
@@ -135,7 +135,7 @@ static char  exports_current_folder[ID_BUFF_SIZE];
 static char *line_read = (char *)NULL;
 static int  verbose = 1;
 
-static char * GetCurrentFolder() 
+static char * GetCurrentFolder()
 {
     switch (domain)
     {
@@ -220,6 +220,11 @@ extern int draw_json_response(char *js, size_t jslen);
 uint parse_folders_and_files_json(char *in, uint size, uint nmemb, char *out)
 {
     uint r = size * nmemb;
+#if ! PAYLOAD_DEBUG
+    FILE * fp = fopen("folder.json", "w");
+    fwrite(in, size, nmemb, fp);
+    fclose(fp);
+#endif
     draw_json_response(in, r);
     return r;
 }
@@ -234,13 +239,13 @@ void show_directory(CURL * curl, char * dir_uuid)
     {
     case Reports:   domain_mode = "Reports"; break;
     case Exports:   domain_mode = "Exports"; break;
-    case Templates: 
+    case Templates:
     default:
         domain_mode = "Templates";
     }
 
-    snprintf(url, 512, "https://fastreport.cloud/api/rp/v1/%s/Folder/%s/ListFolderAndFiles", 
-        domain_mode, 
+    snprintf(url, 512, "https://fastreport.cloud/api/rp/v1/%s/Folder/%s/ListFolderAndFiles",
+        domain_mode,
         dir_uuid);
 
     curl_easy_setopt(curl, CURLOPT_URL, url);
@@ -249,9 +254,9 @@ void show_directory(CURL * curl, char * dir_uuid)
     /* Perform the request, res will get the return code */
     res = curl_easy_perform(curl);
     /* Check for errors */
-    if(res != CURLE_OK)
-      fprintf(stderr, "curl_easy_perform() failed: %s\n",
-              curl_easy_strerror(res));
+    if (res != CURLE_OK)
+        fprintf(stderr, "curl_easy_perform() failed: %s\n",
+            curl_easy_strerror(res));
 }
 
 /* curl write callback, to fill tidy's input buffer...  */
@@ -262,7 +267,7 @@ uint write_cb(char *in, uint size, uint nmemb, char *out)
     if (file_body > 0)
     {
         int l = write(file_body, in, r);
-        if(l < 0) {
+        if (l < 0) {
             printf("written %d bytes errno %d\n", l, errno);
             r = 0;
         }
@@ -273,7 +278,7 @@ uint write_cb(char *in, uint size, uint nmemb, char *out)
     {
         printf("Unable open file '%s' errno %d\n", dnld_params.remote_fname, errno);
     }
-//    write(STDOUT, in, r);
+    //    write(STDOUT, in, r);
     return r;
 }
 
@@ -315,9 +320,9 @@ void download_report(CURL * curl, char * uuid)
         file_body = -1;
     }
     /* Check for errors */
-    if(res != CURLE_OK)
-      fprintf(stderr, "curl_easy_perform() failed: %s\n",
-              curl_easy_strerror(res));
+    if (res != CURLE_OK)
+        fprintf(stderr, "curl_easy_perform() failed: %s\n",
+            curl_easy_strerror(res));
 }
 
 void upload_file(CURL * curl, char * filename)
@@ -352,11 +357,37 @@ void upload_file(CURL * curl, char * filename)
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, stdout);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, NULL);
 
-    char * post = "{ \"name\": \"alman_halfway.frx\", \"content\": \"77u/PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0idXRmLTgiPz4NCjxSZXBvcnQgU2NyaXB0TGFuZ3VhZ2U9IkNTaGFycCIgUmVwb3J0SW5mby5DcmVhdGVkPSIxMi8wNC8yMDIwIDEwOjU4OjU3IiBSZXBvcnRJbmZvLk1vZGlmaWVkPSIxMi8wNC8yMDIwIDExOjAwOjIwIiBSZXBvcnRJbmZvLkNyZWF0b3JWZXJzaW9uPSIyMC4yMC40LjEiPg0KICA8RGljdGlvbmFyeS8+DQogIDxSZXBvcnRQYWdlIE5hbWU9IlBhZ2UxIiBXYXRlcm1hcmsuRm9udD0iQXJpYWwsIDYwcHQiPg0KICAgIDxSZXBvcnRUaXRsZUJhbmQgTmFtZT0iUmVwb3J0VGl0bGUxIiBXaWR0aD0iNzE4LjIiIEhlaWdodD0iMzcuOCIvPg0KICAgIDxQYWdlSGVhZGVyQmFuZCBOYW1lPSJQYWdlSGVhZGVyMSIgVG9wPSI0MSIgV2lkdGg9IjcxOC4yIiBIZWlnaHQ9IjI4LjM1Ii8+DQogICAgPERhdGFCYW5kIE5hbWU9IkRhdGExIiBUb3A9IjcyLjU1IiBXaWR0aD0iNzE4LjIiIEhlaWdodD0iNzUuNiI+DQogICAgICA8VGV4dE9iamVjdCBOYW1lPSJUZXh0MSIgV2lkdGg9IjcxOC4yIiBIZWlnaHQ9Ijc1LjYiIFRleHQ9IkhlbGxvLCBGYXN0UmVwb3J0IENsb3VkISEhIiBIb3J6QWxpZ249IkNlbnRlciIgVmVydEFsaWduPSJDZW50ZXIiIEZvbnQ9IkFyaWFsLCAxMHB0Ii8+DQogICAgPC9EYXRhQmFuZD4NCiAgICA8UGFnZUZvb3RlckJhbmQgTmFtZT0iUGFnZUZvb3RlcjEiIFRvcD0iMTUxLjM1IiBXaWR0aD0iNzE4LjIiIEhlaWdodD0iMTguOSIvPg0KICA8L1JlcG9ydFBhZ2U+DQo8L1JlcG9ydD4NCg==\"}";
-//    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, "{\"hi\" : \"there\"}");
+    char * post = "{ \"name\": \"alman_second_quarter.frx\", \"content\": \"77u/PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0idXRmLTgiPz4NCjxSZXBvcnQgU2NyaXB0TGFuZ3VhZ2U9IkNTaGFycCIgUmVwb3J0SW5mby5DcmVhdGVkPSIxMi8wNC8yMDIwIDEwOjU4OjU3IiBSZXBvcnRJbmZvLk1vZGlmaWVkPSIxMi8wNC8yMDIwIDExOjAwOjIwIiBSZXBvcnRJbmZvLkNyZWF0b3JWZXJzaW9uPSIyMC4yMC40LjEiPg0KICA8RGljdGlvbmFyeS8+DQogIDxSZXBvcnRQYWdlIE5hbWU9IlBhZ2UxIiBXYXRlcm1hcmsuRm9udD0iQXJpYWwsIDYwcHQiPg0KICAgIDxSZXBvcnRUaXRsZUJhbmQgTmFtZT0iUmVwb3J0VGl0bGUxIiBXaWR0aD0iNzE4LjIiIEhlaWdodD0iMzcuOCIvPg0KICAgIDxQYWdlSGVhZGVyQmFuZCBOYW1lPSJQYWdlSGVhZGVyMSIgVG9wPSI0MSIgV2lkdGg9IjcxOC4yIiBIZWlnaHQ9IjI4LjM1Ii8+DQogICAgPERhdGFCYW5kIE5hbWU9IkRhdGExIiBUb3A9IjcyLjU1IiBXaWR0aD0iNzE4LjIiIEhlaWdodD0iNzUuNiI+DQogICAgICA8VGV4dE9iamVjdCBOYW1lPSJUZXh0MSIgV2lkdGg9IjcxOC4yIiBIZWlnaHQ9Ijc1LjYiIFRleHQ9IkhlbGxvLCBGYXN0UmVwb3J0IENsb3VkISEhIiBIb3J6QWxpZ249IkNlbnRlciIgVmVydEFsaWduPSJDZW50ZXIiIEZvbnQ9IkFyaWFsLCAxMHB0Ii8+DQogICAgPC9EYXRhQmFuZD4NCiAgICA8UGFnZUZvb3RlckJhbmQgTmFtZT0iUGFnZUZvb3RlcjEiIFRvcD0iMTUxLjM1IiBXaWR0aD0iNzE4LjIiIEhlaWdodD0iMTguOSIvPg0KICA8L1JlcG9ydFBhZ2U+DQo8L1JlcG9ydD4NCg==\"}";
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, post);
 
     fprintf(stderr, "%s\n", request);
+
+    res = curl_easy_perform(curl);
+    /* Check for errors */
+    if (res != CURLE_OK)
+        fprintf(stderr, "curl_easy_perform() failed: %s\n",
+            curl_easy_strerror(res));
+}
+
+void delete_file(CURL * curl, char * uuid)
+{
+    CURLcode res;
+    char    *   domain_mode;
+    char request[512];
+
+    switch (domain)
+    {
+    case Reports:   domain_mode = "Reports"; break;
+    case Exports:   domain_mode = "Exports"; break;
+    case Templates:
+    default:
+        domain_mode = "Templates";
+    }
+    snprintf(request, 512, "https://fastreport.cloud/api/rp/v1/%s/File/%s", domain_mode, uuid);
+
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, NULL);
+    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
+    curl_easy_setopt(curl, CURLOPT_URL, request);
 
     res = curl_easy_perform(curl);
     /* Check for errors */
@@ -377,9 +408,9 @@ void show_profile(CURL * curl)
     /* Perform the request, res will get the return code */
     res = curl_easy_perform(curl);
     /* Check for errors */
-    if(res != CURLE_OK)
-      fprintf(stderr, "curl_easy_perform() failed: %s\n",
-              curl_easy_strerror(res));
+    if (res != CURLE_OK)
+        fprintf(stderr, "curl_easy_perform() failed: %s\n",
+            curl_easy_strerror(res));
 }
 
 void show_working_dicrectory_path(CURL * curl)
@@ -420,85 +451,95 @@ void user_interface(CURL * curl)
 
     do {
 
-       arg_counter = 0;
-       user_input = readline_gets();
-       words[arg_counter] = strpbrk(user_input, " \t");
-       if(words[arg_counter] != NULL)
-       {
-         *words[arg_counter] = 0;
-         words[arg_counter]++;
-         arg_counter++;
-         printf("Found arg: %s\n", words[0]);
-       }
+        arg_counter = 0;
+        user_input = readline_gets();
+        words[arg_counter] = strpbrk(user_input, " \t");
+        if (words[arg_counter] != NULL)
+        {
+            *words[arg_counter] = 0;
+            words[arg_counter]++;
+            arg_counter++;
+            printf("Found arg: %s\n", words[0]);
+        }
 
-       if(strcmp(user_input, "exit") == 0)
-       {
-          stop = 1;
-//          printf("Длина введённой строки: %ld\n", strlen(user_input));
-       }
-       else if( strcmp(user_input, "ls") == 0 )
-       {
-           show_directory(curl, GetCurrentFolder() );
-       }
-       else if (strcmp(user_input, "lls") == 0)
-       {
-           system("ls -l");
-       }
-       else if (strcmp(user_input, "reports") == 0)
-       {
-           domain = Reports;
-       }
-       else if (strcmp(user_input, "templates") == 0)
-       {
-           domain = Templates;
-       }
-       else if (strcmp(user_input, "exports") == 0)
-       {
-           domain = Exports;
-       }
-       else if (strcmp(user_input, "verbose") == 0)
-       {
-       verbose = verbose ? 0 : 1;
-       curl_easy_setopt(curl, CURLOPT_VERBOSE, verbose);
-       printf("curl verbose mode set to %s", verbose ? "Enabled" : "Disabled");
-       }
-       else if (strcmp(user_input, "cd") == 0)
-       {
-       if (arg_counter != 1)
-       {
-           puts("Current dir changed to root folder. Use folder id as argument for cd command to change current folder");
-           strcpy(GetCurrentFolder(), GetRootFolder());
-           continue;
-       }
-       strcpy(GetCurrentFolder(), words[0]);
-       printf("Directory changed to: %s", GetCurrentFolder());
-       }
-       else if (strcmp(user_input, "pwd") == 0)
-       {
-       show_working_dicrectory_path(curl);
-       }
-       else if (strcmp(user_input, "get") == 0)
-       {
-       if (arg_counter == 1)
-       {
-           download_report(curl, words[0]);
-       }
-       else
-           download_report(curl, "60758ec7377eaa000171a5ec");
-       }
-       else if (strcmp(user_input, "put") == 0)
-       {
-       if (arg_counter != 1)
-           printf("Use> put filename\n  where 'filename' is path to local file\n");
-       else
-           upload_file(curl, words[0]);
-       }
-       else if (strcmp(user_input, "profile") == 0)
-       {
-       show_profile(curl);
-       }
-       else
-       printf("%s", user_input);
+        if (strcmp(user_input, "exit") == 0)
+        {
+            stop = 1;
+            //          printf("Длина введённой строки: %ld\n", strlen(user_input));
+        }
+        else if (strcmp(user_input, "ls") == 0)
+        {
+            if (arg_counter == 0)
+                show_directory(curl, GetCurrentFolder());
+            else if (arg_counter == 1)
+                show_directory(curl, words[0]);
+        }
+        else if (strcmp(user_input, "lls") == 0)
+        {
+            system("ls -l");
+        }
+        else if (strcmp(user_input, "reports") == 0)
+        {
+            domain = Reports;
+        }
+        else if (strcmp(user_input, "templates") == 0)
+        {
+            domain = Templates;
+        }
+        else if (strcmp(user_input, "exports") == 0)
+        {
+            domain = Exports;
+        }
+        else if (strcmp(user_input, "verbose") == 0)
+        {
+            verbose = verbose ? 0 : 1;
+            curl_easy_setopt(curl, CURLOPT_VERBOSE, verbose);
+            printf("curl verbose mode set to %s", verbose ? "Enabled" : "Disabled");
+        }
+        else if (strcmp(user_input, "cd") == 0)
+        {
+            if (arg_counter != 1)
+            {
+                puts("Current dir changed to root folder. Use folder id as argument for cd command to change current folder");
+                strcpy(GetCurrentFolder(), GetRootFolder());
+                continue;
+            }
+            strcpy(GetCurrentFolder(), words[0]);
+            printf("Directory changed to: %s", GetCurrentFolder());
+        }
+        else if (strcmp(user_input, "rm") == 0)
+        {
+            if (arg_counter == 1)
+                delete_file(curl, words[0]);
+            else
+                puts("Use rm uuid to delete file.");
+        }
+        else if (strcmp(user_input, "pwd") == 0)
+        {
+                show_working_dicrectory_path(curl);
+        }
+        else if (strcmp(user_input, "get") == 0)
+        {
+            if (arg_counter == 1)
+            {
+                download_report(curl, words[0]);
+            }
+            else
+                download_report(curl, "60758ec7377eaa000171a5ec");
+        }
+        else if (strcmp(user_input, "put") == 0)
+        {
+            if (arg_counter != 1)
+                printf("Use> put filename\n  where 'filename' is path to local file\n");
+            else
+                upload_file(curl, words[0]);
+        }
+        else if (strcmp(user_input, "profile") == 0)
+        {
+            show_profile(curl);
+        }
+        else
+            printf("%s", user_input);
 
     } while (!stop);
 }
@@ -541,8 +582,6 @@ uint init_cb(char *in, uint size, uint nmemb, char *out)
     }
     return r;
 }
-
-
 
 void user_init(CURL * curl)
 {
@@ -622,9 +661,9 @@ void user_init(CURL * curl)
     curl_easy_setopt(curl, CURLOPT_URL, "https://fastreport.cloud/api/rp/v1/Templates/Root");
     domain = Templates;
     res = curl_easy_perform(curl);
-    if(res != CURLE_OK)
-      fprintf(stderr, "curl_easy_perform() failed: %s\n",
-              curl_easy_strerror(res));
+    if (res != CURLE_OK)
+        fprintf(stderr, "curl_easy_perform() failed: %s\n",
+            curl_easy_strerror(res));
 
     curl_easy_setopt(curl, CURLOPT_URL, "https://fastreport.cloud/api/rp/v1/Reports/Root");
     domain = Reports;
@@ -645,19 +684,19 @@ void user_init(CURL * curl)
 
 int main(void)
 {
-  CURL *curl;
-  CURLcode res;
+    CURL *curl;
+    CURLcode res;
 
-  curl_global_init(CURL_GLOBAL_DEFAULT);
+    curl_global_init(CURL_GLOBAL_DEFAULT);
 
-  curl = curl_easy_init();
-  if(curl) {
-    user_init(curl);
-    user_interface(curl);
-    curl_easy_cleanup(curl);
-  }
+    curl = curl_easy_init();
+    if (curl) {
+        user_init(curl);
+        user_interface(curl);
+        curl_easy_cleanup(curl);
+    }
 
-  curl_global_cleanup();
+    curl_global_cleanup();
 
-  return 0;
+    return 0;
 }
