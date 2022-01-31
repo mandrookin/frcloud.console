@@ -313,6 +313,8 @@ void download_report(CURL * curl, char * uuid)
     file_body = -1;
     download_size = 0;
     res = curl_easy_perform(curl);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, NULL);
+
     if (file_body > 0)
     {
         close(file_body);
@@ -360,10 +362,12 @@ void upload_file(CURL * curl, char * filename)
     char * post = "{ \"name\": \"alman_second_quarter.frx\", \"content\": \"77u/PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0idXRmLTgiPz4NCjxSZXBvcnQgU2NyaXB0TGFuZ3VhZ2U9IkNTaGFycCIgUmVwb3J0SW5mby5DcmVhdGVkPSIxMi8wNC8yMDIwIDEwOjU4OjU3IiBSZXBvcnRJbmZvLk1vZGlmaWVkPSIxMi8wNC8yMDIwIDExOjAwOjIwIiBSZXBvcnRJbmZvLkNyZWF0b3JWZXJzaW9uPSIyMC4yMC40LjEiPg0KICA8RGljdGlvbmFyeS8+DQogIDxSZXBvcnRQYWdlIE5hbWU9IlBhZ2UxIiBXYXRlcm1hcmsuRm9udD0iQXJpYWwsIDYwcHQiPg0KICAgIDxSZXBvcnRUaXRsZUJhbmQgTmFtZT0iUmVwb3J0VGl0bGUxIiBXaWR0aD0iNzE4LjIiIEhlaWdodD0iMzcuOCIvPg0KICAgIDxQYWdlSGVhZGVyQmFuZCBOYW1lPSJQYWdlSGVhZGVyMSIgVG9wPSI0MSIgV2lkdGg9IjcxOC4yIiBIZWlnaHQ9IjI4LjM1Ii8+DQogICAgPERhdGFCYW5kIE5hbWU9IkRhdGExIiBUb3A9IjcyLjU1IiBXaWR0aD0iNzE4LjIiIEhlaWdodD0iNzUuNiI+DQogICAgICA8VGV4dE9iamVjdCBOYW1lPSJUZXh0MSIgV2lkdGg9IjcxOC4yIiBIZWlnaHQ9Ijc1LjYiIFRleHQ9IkhlbGxvLCBGYXN0UmVwb3J0IENsb3VkISEhIiBIb3J6QWxpZ249IkNlbnRlciIgVmVydEFsaWduPSJDZW50ZXIiIEZvbnQ9IkFyaWFsLCAxMHB0Ii8+DQogICAgPC9EYXRhQmFuZD4NCiAgICA8UGFnZUZvb3RlckJhbmQgTmFtZT0iUGFnZUZvb3RlcjEiIFRvcD0iMTUxLjM1IiBXaWR0aD0iNzE4LjIiIEhlaWdodD0iMTguOSIvPg0KICA8L1JlcG9ydFBhZ2U+DQo8L1JlcG9ydD4NCg==\"}";
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, post);
 
-    fprintf(stderr, "%s\n", request);
-
     res = curl_easy_perform(curl);
-    /* Check for errors */
+
+    curl_slist_free_all(headers);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, NULL);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, NULL);
+
     if (res != CURLE_OK)
         fprintf(stderr, "curl_easy_perform() failed: %s\n",
             curl_easy_strerror(res));
@@ -390,6 +394,9 @@ void delete_file(CURL * curl, char * uuid)
     curl_easy_setopt(curl, CURLOPT_URL, request);
 
     res = curl_easy_perform(curl);
+
+    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, NULL);
+
     /* Check for errors */
     if (res != CURLE_OK)
         fprintf(stderr, "curl_easy_perform() failed: %s\n",
@@ -583,75 +590,18 @@ uint init_cb(char *in, uint size, uint nmemb, char *out)
     return r;
 }
 
-void user_init(CURL * curl)
+void user_init(CURL * curl, char * auth)
 {
     CURLcode res;
-    char * key_token;
-    char    auth[256];
-
-    strcpy(auth, "apikey:");
-
-    if (access(KEY_FILE, R_OK) == -1)
-    {
-        int i;
-
-        int key_fd = open(KEY_FILE, O_WRONLY | O_CREAT, S_IRUSR | S_IWUSR);
-        if (key_fd > 0)
-        {
-        not_correct_input:
-            key_token = readline(
-                "Security token not found. You may enter tocken now and it will be stored to "
-                KEY_FILE
-                " file in current directory.\nPress enter without input to exit console now.\nToken>");
-            int len = strlen(key_token);
-            if (len == 0)
-            {
-                curl_global_cleanup();
-                close(key_fd);
-                remove(KEY_FILE);
-                fprintf(stderr, "Programm aborted by user request - no token provided\n");
-                exit(1);
-            }
-            for (i = 0; i < 52; i++) {
-                char c = key_token[i];
-                if (isdigit(c) || (isascii(c) && islower(c)))
-                    continue;
-                goto not_correct_input;
-            }
-            key_token[i] = 0;
-            write(key_fd, key_token, strlen(key_token));
-            strcat(auth, key_token);
-            close(key_fd);
-        }
-        else
-        {
-            fprintf(stderr, "Unable create access key template: %s", KEY_FILE);
-            exit(4);
-        }
-    }
-    else
-    {
-        FILE * key_file;
-        char    buff[128];
-        key_file = fopen(KEY_FILE, "r");
-        if (fgets(buff, sizeof(buff), key_file) == NULL)
-        {
-            fprintf(stderr, "Unable read token\n");
-            exit(2);
-        }
-        fclose(key_file);
-        if (strlen(buff) != 52)
-        {
-            fprintf(stderr, "Access token size error\n");
-            exit(3);
-        }
-        strcat(auth, buff);
-    }
-
-    curl_easy_setopt(curl, CURLOPT_USERPWD, auth);
 
     memset(reports_root_folder, 0, sizeof(reports_root_folder));
+    memset(reports_current_folder, 0, sizeof(reports_current_folder));
+    memset(templates_root_folder, 0, sizeof(templates_root_folder));
+    memset(templates_current_folder, 0, sizeof(templates_current_folder));
+    memset(exports_root_folder, 0, sizeof(exports_root_folder));
+    memset(exports_current_folder, 0, sizeof(exports_current_folder));
 
+    curl_easy_setopt(curl, CURLOPT_USERPWD, auth);
     curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2_0);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "FastReport.Cloud/0.1 (Linux) libcurl");
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, stdout);
@@ -686,12 +636,19 @@ int main(void)
 {
     CURL *curl;
     CURLcode res;
+    char    auth[256];
+
+    strcpy(auth, "apikey:");
+    if (load_token(KEY_FILE, auth) < 0) {
+        fprintf(stderr, "Unable set tocken\n");
+        return EXIT_FAILURE;
+    }
 
     curl_global_init(CURL_GLOBAL_DEFAULT);
 
     curl = curl_easy_init();
     if (curl) {
-        user_init(curl);
+        user_init(curl, auth);
         user_interface(curl);
         curl_easy_cleanup(curl);
     }

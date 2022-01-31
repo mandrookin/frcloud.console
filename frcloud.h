@@ -18,5 +18,6 @@ typedef struct {
 
 typedef enum { Templates, Reports, Exports} domain_t;
 
+int load_token(char * tokenfilename, char * auth);
 
 #endif
