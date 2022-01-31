@@ -292,7 +292,6 @@ void download_report(CURL * curl, char * uuid)
     }
     //
     // 
-//    curl_easy_setopt(curl, CURLOPT_USERAGENT, "Mozilla/5.0 (Windows NT 5.1; rv:21.0) Gecko/20130401 Firefox/21.0");
     struct curl_slist *headers = NULL;
     headers = curl_slist_append(headers, "Accept: text/html, application/xhtml+xml, application/xml, application/octet-stream");
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
@@ -611,6 +610,7 @@ void user_init(CURL * curl)
     memset(reports_root_folder, 0, sizeof(reports_root_folder));
 
     curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2_0);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "FastReport.Cloud/0.1 (Linux) libcurl");
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, stdout);
     curl_easy_setopt(curl, CURLOPT_VERBOSE, verbose);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, init_cb);
