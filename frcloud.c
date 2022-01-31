@@ -116,7 +116,11 @@ bail:
 
 #define ID_BUFF_SIZE  26
 
-static const char const * const modes[3] = { "\nTemplates>", "\nReports>", "\nExports>" };
+static const char const * const modes[3] = { 
+    "\n\x1B[32m\x1B[1mTemplates> \x1B[0m", 
+    "\n\x1B[32m\x1B[1mReports> \x1B[0m", 
+    "\n\x1B[32m\x1B[1mExports> \x1B[0m" 
+};
 static int file_body;
 static dnld_params_t dnld_params;
 static domain_t domain = Templates;
