@@ -9,18 +9,22 @@ This is a simple console shell to [FastReport Cloud](https://fastreport.cloud/ "
 <li>readline-development</li>
 </ul>     
 
-Theses packages provide libraries and headers for building cloud console. Name of packages may vary depends on your distro.
+Theses packages provide libraries and headers for building cloud console. Name of packages may vary depends on your distro. Debian example:
+ ```bash
+ apt-get install libcurl4-gnutls-dev
+ apt-get install gnutls-dev
+```
 
-Source code includes some parts of https://github.com/zserge/jsmn.git 
+Cloud shell source code includes some parts of https://github.com/zserge/jsmn.git 
 
 ### Build: ###  
 
-just type ```make``` in project directory  
-just type ```strip frcloud``` to reduce binary size
+type ```make``` in project directory for build executable  
+type ```strip frcloud``` for reducing binary size  
   
 ### Running ###
 
-jsut type ```./frcoud```
+type ```./frcoud``` for run console
 
 If token file not found then programm will ask for token. Provide correct token and it will be stored to a configuration file. 
 
