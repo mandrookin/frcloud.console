@@ -121,7 +121,6 @@ static const char const * const modes[3] = {
     "\n\x1B[32m\x1B[1mExports> \x1B[0m"
 };
 
-static char *line_read = (char *)NULL;
 static int  verbose = 0;
 static int stop;
 static int file_body;
@@ -212,22 +211,26 @@ size_t dnld_header_parse(void *hdr, size_t size, size_t nmemb, void *userdata)
 
 char * readline_gets()
 {
-    /* If the buffer has already been allocated, return the memory
-       to the free pool. */
+    static char *line_read = (char *)NULL;
+    char  * line_ptr;
+
     if (line_read)
     {
         free(line_read);
         line_read = (char *)NULL;
     }
 
-    /* Get a line from the user. */
-    line_read = readline(/*"\n@>"*/ modes[domain]);
+    line_ptr = line_read = readline(/*"\n@>"*/ modes[domain]);
 
-    /* If the line has any text in it, save it on the history. */
-    if (line_read && *line_read)
-        add_history(line_read);
+    if (line_ptr)
+    {
+        while (isspace(*line_ptr))
+            line_ptr++;
+        if(*line_ptr)
+            add_history(line_ptr);
+    }
 
-    return (line_read);
+    return (line_ptr);
 }
 
 static uint parse_folders_and_files_json(char *in, uint size, uint nmemb, char *out)
@@ -523,21 +526,21 @@ static void change_directory(command_context_t * context)
     printf("Directory changed to: %s", GetCurrentFolder());
 }
 
-static void logout_cloud(command_context_t * context) 
-{ 
-    stop = 1; 
+static void logout_cloud(command_context_t * context)
+{
+    stop = 1;
 }
-static void select_templates(command_context_t * context) 
-{ 
-    domain = Templates; 
+static void select_templates(command_context_t * context)
+{
+    domain = Templates;
 }
-static void select_reports(command_context_t * context) 
-{ 
-    domain = Reports; 
+static void select_reports(command_context_t * context)
+{
+    domain = Reports;
 }
-static void select_exports(command_context_t * context) 
+static void select_exports(command_context_t * context)
 { 
-    domain = Exports; 
+    domain = Exports;
 }
 static void local_dir_list(command_context_t * context)
 {
@@ -559,7 +562,7 @@ command_record_t    commands[] = {
     {"put", upload_file, "upload template, report or document to cloud"},
     {"pwd",     show_working_dicrectory_path, "print working directory path", NULL},
     {"help",    help, "shows list of supported commands or comand description", NULL},
-    {"exit", logout_cloud, "exit from FRCloud console"},
+    {"exit", logout_cloud, "exit from FRCloud console. You may also use Ctrl+d"},
     {"templates", select_templates, "switch to templates domain"},
     {"reports", select_reports, "switch to reports domain"},
     {"exports", select_exports, "switch to exports domain"},
@@ -585,19 +588,28 @@ void user_interface(CURL * curl)
 {
     command_context_t       context;
     command_record_t    *   cmd_ptr;
+    char                *   ptr;
+
+    puts("Welcome to \x1B[36mFastReport.Cloud\x1B[0m shell. Type 'help' to see list of builtin commands.");
     stop = 0;
-    puts("Welcome to \x1B[33mFastReport.Cloud\x1B[0m shell. Type 'help' to see list of builtin commands.");
     do {
         context.curl = curl;
         context.words_count = 0;
         context.command = readline_gets();
-        context.words[context.words_count] = strpbrk(context.command, " \t");
-        if (context.words[context.words_count] != NULL)
-        {
-            *context.words[context.words_count] = 0;
-            context.words[context.words_count]++;
-            context.words_count++;
-            printf("Found arg: %s\n", context.words[0]);
+        if (context.command == NULL) {
+            stop = 1;
+            puts("");
+            continue;
+        }
+        ptr = strpbrk(context.command, " \t");
+        if (ptr) {
+            *ptr++ = 0;
+            while (isspace(*ptr)) 
+                ptr++;
+            if (*ptr) {
+                context.words[context.words_count] = ptr;
+                context.words_count++;
+            }
         }
 
         if (context.command[0] == 0)
