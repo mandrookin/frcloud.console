@@ -1,6 +1,6 @@
 # FastReport Cloud console shell #
 
-This is a simple console shell to [FastReport Cloud](https://fastreport.cloud.com/ "FastReport.Cloud") service.
+This is a simple console shell to [FastReport Cloud](https://fastreport.cloud/ "FastReport.Cloud") service.
 
 ### Prerequests GNU packages for build shell: ### 
 <ul>
@@ -15,7 +15,8 @@ Source code includes some parts of https://github.com/zserge/jsmn.git
 
 ### Build: ###  
 
-just type ```make``` in project directory
+just type ```make``` in project directory  
+just type ```strip frcloud``` to reduce binary size
   
 ### Running ###
 
