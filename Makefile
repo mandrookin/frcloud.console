@@ -6,7 +6,7 @@ debug:
 	gcc -g frcloud.c jsonparser.c config.c base64.c -lgnutls -lcurl -lreadline -o frcloud
 
 clean:
-	rm frcloud
+	rm -f frcloud *.bak
 	chmod -x *.h *.c
 
 strip:

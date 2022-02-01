@@ -6,7 +6,6 @@
 #include <string.h>
 #include <errno.h>
 
-
 #include <readline/readline.h>
 #include <readline/history.h>
 
@@ -233,6 +232,48 @@ char * readline_gets()
     return (line_ptr);
 }
 
+static void prepare_report(command_context_t * context)
+{
+    CURLcode    res;
+    char        request[512];
+
+    if (context->words_count != 1) {
+        puts("Not enough arguments. Use:\n> get 60758ec7377eaa000171a5ec\nwhere 60758ec7377eaa000171a5ec is uuid of template");
+        return;
+    }
+    
+    snprintf(request, 512, "%s/api/rp/v1/Templates/File/%s/Prepare",
+        DEFAULT_SERVER,
+        context->words[0]);
+
+    struct curl_slist *headers = NULL;
+    headers = curl_slist_append(headers, "Content-Type: application/json-patch+json");
+    curl_easy_setopt(context->curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(context->curl, CURLOPT_URL, request);
+    curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, stdout);
+    curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, NULL);
+
+#define PREPARE_JSON_MAX_SIZE   1024
+
+    char * post = alloca(PREPARE_JSON_MAX_SIZE);
+    snprintf(post, PREPARE_JSON_MAX_SIZE,
+        "{ \"name\": \"alman_prepared_report.fpx\", \"parentFolderId\": \"%s\"}",
+        reports_current_folder);
+
+    curl_easy_setopt(context->curl, CURLOPT_POSTFIELDS, post);
+
+    res = curl_easy_perform(context->curl);
+
+    curl_slist_free_all(headers);
+    curl_easy_setopt(context->curl, CURLOPT_HTTPHEADER, NULL);
+    curl_easy_setopt(context->curl, CURLOPT_POSTFIELDS, NULL);
+    curl_easy_setopt(context->curl, CURLOPT_POST, 0);
+
+    if (res != CURLE_OK)
+        fprintf(stderr, "curl_easy_perform() failed: %s\n",
+            curl_easy_strerror(res));
+}
+
 static uint parse_folders_and_files_json(char *in, uint size, uint nmemb, char *out)
 {
     uint r = size * nmemb;
@@ -273,18 +314,11 @@ void show_directory(command_context_t * context)
         return;
     }
 
-#if  1
     snprintf(request, 512, "%s/api/rp/v1/%s/Folder/%s/ListFolderAndFiles%s",
         DEFAULT_SERVER,
         GetDomainMode(),
         dir_uuid,
         search_pattern);
-#else
-    snprintf(url, 512, "%s/api/rp/v1/%s/Folder/%s/ListFolderAndFiles?searchPattern=b",
-        DEFAULT_SERVER,
-        GetDomainMode(),
-        dir_uuid);
-#endif
 
     curl_easy_setopt(context->curl, CURLOPT_URL, request);
     curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, parse_folders_and_files_json);
@@ -298,7 +332,7 @@ void show_directory(command_context_t * context)
 }
 
 /* curl write callback, to fill tidy's input buffer...  */
-uint write_cb(char *in, uint size, uint nmemb, char *out)
+static uint write_cb(char *in, uint size, uint nmemb, char *out)
 {
     uint r = size * nmemb;
 
@@ -320,7 +354,7 @@ uint write_cb(char *in, uint size, uint nmemb, char *out)
     return r;
 }
 
-void download_file(command_context_t * context)
+static void download_file(command_context_t * context)
 {
     CURLcode res;
     char request[512];
@@ -371,7 +405,7 @@ void download_file(command_context_t * context)
             curl_easy_strerror(res));
 }
 
-void upload_file(command_context_t * context)
+static void upload_file(command_context_t * context)
 {
     CURLcode    res;
     char    *   filename;
@@ -424,6 +458,7 @@ void upload_file(command_context_t * context)
     char * content = base64_encode(input, source_size, &encoded_size);
 
 #define REQUEST_BUFF_SIZE (encoded_size + 192)
+
     char * post = alloca(REQUEST_BUFF_SIZE);
     snprintf(post, REQUEST_BUFF_SIZE, "{ \"name\": \"%s\", \"content\": \"%s\"}",
         filename,
@@ -433,7 +468,6 @@ void upload_file(command_context_t * context)
     curl_easy_setopt(context->curl, CURLOPT_POSTFIELDS, post);
 
     res = curl_easy_perform(context->curl);
-
 
     curl_slist_free_all(headers);
     curl_easy_setopt(context->curl, CURLOPT_HTTPHEADER, NULL);
@@ -445,7 +479,7 @@ void upload_file(command_context_t * context)
             curl_easy_strerror(res));
 }
 
-void delete_remote_object(command_context_t * context)
+static void delete_remote_object(command_context_t * context)
 {
     CURLcode res;
     char * object_type;
@@ -581,13 +615,14 @@ static void switch_verbosity(command_context_t * context)
 static void help(command_context_t * context);
 
 command_record_t    commands[] = {
+    {"help",    help, "shows list of supported commands or command description", NULL},
+    {"prepare", prepare_report, "prepare report by it's UUID"},
     {"ls",      show_directory, "show directory context"},
     {"search",  show_directory, "show directory context by mask"},
     {"cd",      change_directory, "change current directory by it's UUID"},
     {"get",     download_file, "download template, report or document by it's UUID"},
     {"put",     upload_file, "upload template, report or document to cloud"},
     {"pwd",     show_working_dicrectory_path, "print working directory path", NULL},
-    {"help",    help, "shows list of supported commands or comand description", NULL},
     {"exit",    logout_cloud, "exit from FRCloud console. You may also use Ctrl+d"},
     {"templates",   select_templates, "switch to templates domain"},
     {"reports", select_reports, "switch to reports domain"},
@@ -603,10 +638,10 @@ command_record_t    commands[] = {
 static void help(command_context_t * context)
 {
     command_record_t   * ptr = commands;
-    puts("List of supported commands:");
+    printf("List of supported commands:");
     while (ptr->command_name != NULL) 
     {
-        printf(" %-10s    %s\n", ptr->command_name, ptr->short_help);
+        printf("\n %-10s    %s", ptr->command_name, ptr->short_help);
         ptr++;
     }
 }
