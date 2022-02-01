@@ -254,7 +254,8 @@ void show_directory(command_context_t * context)
         domain_mode = "Templates";
     }
 
-    snprintf(url, 512, "https://fastreport.cloud/api/rp/v1/%s/Folder/%s/ListFolderAndFiles",
+    snprintf(url, 512, "%s/api/rp/v1/%s/Folder/%s/ListFolderAndFiles",
+        DEFAULT_SERVER,
         domain_mode,
         dir_uuid);
 
@@ -314,7 +315,7 @@ void download_file(command_context_t * context)
         op = 'e';
         break;
     }
-    snprintf(request, 512, "https://fastreport.cloud/download/%c/%s", op, context->words[0]);
+    snprintf(request, 512, "%s/download/%c/%s", DEFAULT_SERVER, op, context->words[0]);
 
     // 
     struct curl_slist *headers = NULL;
@@ -369,7 +370,8 @@ void upload_file(command_context_t * context)
         domain_mode = "Templates";
     }
 
-    snprintf(request, 512, "https://fastreport.cloud/api/rp/v1/%s/Folder/%s/File",
+    snprintf(request, 512, "%s/api/rp/v1/%s/Folder/%s/File",
+        DEFAULT_SERVER,
         domain_mode,
         GetCurrentFolder());
 
@@ -414,7 +416,10 @@ void delete_file(command_context_t * context)
     default:
         domain_mode = "Templates";
     }
-    snprintf(request, 512, "https://fastreport.cloud/api/rp/v1/%s/File/%s", domain_mode, context->words[0]);
+    snprintf(request, 512, "%s/api/rp/v1/%s/File/%s", 
+        DEFAULT_SERVER, 
+        domain_mode, 
+        context->words[0]);
 
     curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, NULL);
     curl_easy_setopt(context->curl, CURLOPT_CUSTOMREQUEST, "DELETE");
@@ -433,11 +438,11 @@ void delete_file(command_context_t * context)
 static void show_profile(command_context_t * context)
 {
     CURLcode res;
-    puts("----------------------- SHOW PROFILE ----------------------\n\n");
+    puts("----------------------- SHOW PROFILE ----------------------");
 
     curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, stdout);
     curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, NULL);
-    curl_easy_setopt(context->curl, CURLOPT_URL, "https://fastreport.cloud/api/manage/v1/UserProfile");
+    curl_easy_setopt(context->curl, CURLOPT_URL, DEFAULT_SERVER "/api/manage/v1/UserProfile");
 
     /* Perform the request, res will get the return code */
     res = curl_easy_perform(context->curl);
@@ -462,7 +467,8 @@ static void show_working_dicrectory_path(command_context_t * context)
         domain_mode = "Templates";
     }
 
-    snprintf(request, sizeof(request), "https://fastreport.cloud/api/rp/v1/%s/Folder/%s/Breadcrumbs",
+    snprintf(request, sizeof(request), "%s/api/rp/v1/%s/Folder/%s/Breadcrumbs",
+        DEFAULT_SERVER,
         domain_mode,
         GetCurrentFolder());
 
@@ -526,7 +532,6 @@ command_record_t    commands[] = {
     {"cd", change_directory, "change current directory by it's UUID"},
     {"get", download_file, "download template, report or document by it's UUID"},
     {"put", upload_file, "upload template, report or document to cloud"},
-    {"profile", show_profile, "show user profile", NULL},
     {"pwd",     show_working_dicrectory_path, "print working directory path", NULL},
     {"help",    help, "shows list of supported commands or comand description", NULL},
     {"exit", logout_cloud, "exit from FRCloud console"},
@@ -536,6 +541,7 @@ command_record_t    commands[] = {
     {"lls", local_dir_list, "list of local directory"},
     {"rm", delete_file, "delete file by it's UUID"},
     {"verbose", switch_verbosity, "Toggle curl verbose mode ON/OFF"},
+    {"profile", show_profile, "show user profile", NULL},
     {NULL, NULL, NULL, NULL}
 };
 
@@ -646,21 +652,21 @@ void user_init(CURL * curl, char * auth)
     curl_easy_setopt(curl, CURLOPT_VERBOSE, verbose);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, init_cb);
 
-    curl_easy_setopt(curl, CURLOPT_URL, "https://fastreport.cloud/api/rp/v1/Templates/Root");
+    curl_easy_setopt(curl, CURLOPT_URL, DEFAULT_SERVER "/api/rp/v1/Templates/Root");
     domain = Templates;
     res = curl_easy_perform(curl);
     if (res != CURLE_OK)
         fprintf(stderr, "curl_easy_perform() failed: %s\n",
             curl_easy_strerror(res));
 
-    curl_easy_setopt(curl, CURLOPT_URL, "https://fastreport.cloud/api/rp/v1/Reports/Root");
+    curl_easy_setopt(curl, CURLOPT_URL, DEFAULT_SERVER "/api/rp/v1/Reports/Root");
     domain = Reports;
     res = curl_easy_perform(curl);
     if (res != CURLE_OK)
         fprintf(stderr, "curl_easy_perform() failed: %s\n",
             curl_easy_strerror(res));
 
-    curl_easy_setopt(curl, CURLOPT_URL, "https://fastreport.cloud/api/rp/v1/Exports/Root");
+    curl_easy_setopt(curl, CURLOPT_URL, DEFAULT_SERVER "/api/rp/v1/Exports/Root");
     domain = Exports;
     res = curl_easy_perform(curl);
     if (res != CURLE_OK)

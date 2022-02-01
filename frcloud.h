@@ -4,8 +4,10 @@
 #include <curl/curl.h>
 
 
-// Pplace for key file
-#define KEY_FILE    "FastReport.Cloud.key"
+// Peplace with suitable key file name
+#define KEY_FILE            "FastReport.Cloud.key"
+// FastReport cloud server address
+#define DEFAULT_SERVER      "https://fastreport.cloud"
 
 typedef unsigned long uint64_t;
 
