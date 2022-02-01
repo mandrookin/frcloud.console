@@ -1,15 +1,26 @@
-* FastReport Cloud console shell *
+# FastReport Cloud console shell #
 
-This is simple shell to FastReport Cloud service.
+This is a simple console shell to [FastReport Cloud](https://fastreport.cloud.com/ "FastReport.Cloud") service.
 
-Prerequests GNU packages for build shell: 
-   curl-development 
-   gnutls-development
-   readline-development 
-   
-Theses packagees provide libraries and headers for building cloude console
+### Prerequests GNU packages for build shell: ### 
+<ul>
+<li>curl-development</li>
+<li>gnutls-development</li>
+<li>readline-development</li>
+</ul>     
 
+Theses packages provide libraries and headers for building cloud console. Name of packages may vary depends on your distro.
 
-Build: 
-  just type make 
+Source code includes some parts of https://github.com/zserge/jsmn.git 
+
+### Build: ###  
+
+just type ```make``` in project directory
+  
+### Running ###
+
+jsut type ```./frcoud```
+
+If token file not found then programm will ask for token. Provide correct token and it will be stored to a configuration file. 
+
 
