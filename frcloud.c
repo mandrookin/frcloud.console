@@ -157,6 +157,21 @@ static char * GetRootFolder()
     return templates_root_folder;
 }
 
+static char * GetDomainMode()
+{
+    char    *   domain_mode;
+
+    switch (domain)
+    {
+    case Reports:   domain_mode = "Reports"; break;
+    case Exports:   domain_mode = "Exports"; break;
+    case Templates:
+    default:
+        domain_mode = "Templates";
+    }
+    return domain_mode;
+}
+
 size_t dnld_header_parse(void *hdr, size_t size, size_t nmemb, void *userdata)
 {
     const   size_t  cb = size * nmemb;
@@ -215,9 +230,7 @@ char * readline_gets()
     return (line_read);
 }
 
-extern int draw_json_response(char *js, size_t jslen);
-
-uint parse_folders_and_files_json(char *in, uint size, uint nmemb, char *out)
+static uint parse_folders_and_files_json(char *in, uint size, uint nmemb, char *out)
 {
     uint r = size * nmemb;
 #if PAYLOAD_DEBUG
@@ -225,14 +238,13 @@ uint parse_folders_and_files_json(char *in, uint size, uint nmemb, char *out)
     fwrite(in, size, nmemb, fp);
     fclose(fp);
 #endif
-    draw_json_response(in, r);
+    draw_json_ListFolderAndFiles(in, r);
     return r;
 }
 
 void show_directory(command_context_t * context)
 {
     CURLcode res;
-    char    *   domain_mode;
     char    *   dir_uuid;
     char  url[512];
 
@@ -245,19 +257,17 @@ void show_directory(command_context_t * context)
         return;
     }
 
-    switch (domain)
-    {
-    case Reports:   domain_mode = "Reports"; break;
-    case Exports:   domain_mode = "Exports"; break;
-    case Templates:
-    default:
-        domain_mode = "Templates";
-    }
-
+#if  1
     snprintf(url, 512, "%s/api/rp/v1/%s/Folder/%s/ListFolderAndFiles",
         DEFAULT_SERVER,
-        domain_mode,
+        GetDomainMode(),
         dir_uuid);
+#else
+    snprintf(url, 512, "%s/api/rp/v1/%s/Folder/%s/ListFolderAndFiles?searchPattern=b",
+        DEFAULT_SERVER,
+        GetDomainMode(),
+        dir_uuid);
+#endif
 
     curl_easy_setopt(context->curl, CURLOPT_URL, url);
     curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, parse_folders_and_files_json);
@@ -347,7 +357,6 @@ void download_file(command_context_t * context)
 void upload_file(command_context_t * context)
 {
     CURLcode    res;
-    char    *   domain_mode;
     char    *   filename;
     char        request[512];
 
@@ -361,18 +370,9 @@ void upload_file(command_context_t * context)
         return;
     }
 
-    switch (domain)
-    {
-    case Reports:   domain_mode = "Reports"; break;
-    case Exports:   domain_mode = "Exports"; break;
-    case Templates:
-    default:
-        domain_mode = "Templates";
-    }
-
     snprintf(request, 512, "%s/api/rp/v1/%s/Folder/%s/File",
         DEFAULT_SERVER,
-        domain_mode,
+        GetDomainMode(),
         GetCurrentFolder());
 
     struct curl_slist *headers = NULL;
@@ -382,10 +382,41 @@ void upload_file(command_context_t * context)
     curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, stdout);
     curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, NULL);
 
-    char * post = "{ \"name\": \"alman_remove_asap.frx\", \"content\": \"77u/PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0idXRmLTgiPz4NCjxSZXBvcnQgU2NyaXB0TGFuZ3VhZ2U9IkNTaGFycCIgUmVwb3J0SW5mby5DcmVhdGVkPSIxMi8wNC8yMDIwIDEwOjU4OjU3IiBSZXBvcnRJbmZvLk1vZGlmaWVkPSIxMi8wNC8yMDIwIDExOjAwOjIwIiBSZXBvcnRJbmZvLkNyZWF0b3JWZXJzaW9uPSIyMC4yMC40LjEiPg0KICA8RGljdGlvbmFyeS8+DQogIDxSZXBvcnRQYWdlIE5hbWU9IlBhZ2UxIiBXYXRlcm1hcmsuRm9udD0iQXJpYWwsIDYwcHQiPg0KICAgIDxSZXBvcnRUaXRsZUJhbmQgTmFtZT0iUmVwb3J0VGl0bGUxIiBXaWR0aD0iNzE4LjIiIEhlaWdodD0iMzcuOCIvPg0KICAgIDxQYWdlSGVhZGVyQmFuZCBOYW1lPSJQYWdlSGVhZGVyMSIgVG9wPSI0MSIgV2lkdGg9IjcxOC4yIiBIZWlnaHQ9IjI4LjM1Ii8+DQogICAgPERhdGFCYW5kIE5hbWU9IkRhdGExIiBUb3A9IjcyLjU1IiBXaWR0aD0iNzE4LjIiIEhlaWdodD0iNzUuNiI+DQogICAgICA8VGV4dE9iamVjdCBOYW1lPSJUZXh0MSIgV2lkdGg9IjcxOC4yIiBIZWlnaHQ9Ijc1LjYiIFRleHQ9IkhlbGxvLCBGYXN0UmVwb3J0IENsb3VkISEhIiBIb3J6QWxpZ249IkNlbnRlciIgVmVydEFsaWduPSJDZW50ZXIiIEZvbnQ9IkFyaWFsLCAxMHB0Ii8+DQogICAgPC9EYXRhQmFuZD4NCiAgICA8UGFnZUZvb3RlckJhbmQgTmFtZT0iUGFnZUZvb3RlcjEiIFRvcD0iMTUxLjM1IiBXaWR0aD0iNzE4LjIiIEhlaWdodD0iMTguOSIvPg0KICA8L1JlcG9ydFBhZ2U+DQo8L1JlcG9ydD4NCg==\"}";
+    size_t encoded_size;
+
+//    Priliminary code. Limit file size to buffer size
+
+    char input[1024 * 3];
+
+    int source_file = open(filename, O_RDONLY);
+    if (source_file < 0) {
+        fprintf(stderr, "Unable open source file: %s", filename);
+        return;
+    }
+    int source_size = read(source_file, input, sizeof(input));
+    if (source_file < 0) {
+        fprintf(stderr, "Unable read source file: %s", filename);
+        return;
+    }
+    close(source_file);
+    if (source_size > sizeof(input)) {
+        fprintf(stderr, "Current version limit upload size to %ld bytes\n", sizeof(input));
+        return;
+    }
+
+    char * content = base64_encode(input, source_size, &encoded_size);
+
+#define REQUEST_BUFF_SIZE (encoded_size + 192)
+    char * post = alloca(REQUEST_BUFF_SIZE);
+    snprintf(post, REQUEST_BUFF_SIZE, "{ \"name\": \"%s\", \"content\": \"%s\"}",
+        filename,
+        content);
+    free(content);
+
     curl_easy_setopt(context->curl, CURLOPT_POSTFIELDS, post);
 
     res = curl_easy_perform(context->curl);
+
 
     curl_slist_free_all(headers);
     curl_easy_setopt(context->curl, CURLOPT_HTTPHEADER, NULL);
@@ -400,7 +431,6 @@ void upload_file(command_context_t * context)
 void delete_file(command_context_t * context)
 {
     CURLcode res;
-    char    *   domain_mode;
     char request[512];
 
     if (context->words_count != 1) {
@@ -408,17 +438,9 @@ void delete_file(command_context_t * context)
         return;
     }
 
-    switch (domain)
-    {
-    case Reports:   domain_mode = "Reports"; break;
-    case Exports:   domain_mode = "Exports"; break;
-    case Templates:
-    default:
-        domain_mode = "Templates";
-    }
     snprintf(request, 512, "%s/api/rp/v1/%s/File/%s", 
         DEFAULT_SERVER, 
-        domain_mode, 
+        GetDomainMode(),
         context->words[0]);
 
     curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, NULL);
@@ -452,33 +474,36 @@ static void show_profile(command_context_t * context)
             curl_easy_strerror(res));
 }
 
+static uint parse_working_directory_json(char *in, uint size, uint nmemb, char *out)
+{
+    uint r = size * nmemb;
+#if PAYLOAD_DEBUG
+    FILE * fp = fopen("pwd.json", "w");
+    fwrite(in, size, nmemb, fp);
+    fclose(fp);
+#endif
+    draw_json_Breadcrumbs(in, r);
+    return r;
+}
+
 static void show_working_dicrectory_path(command_context_t * context)
 {
     CURLcode res;
-    char * domain_mode;
     char request[512];
-
-    switch (domain)
-    {
-    case Reports:   domain_mode = "Reports"; break;
-    case Exports:   domain_mode = "Exports"; break;
-    case Templates:
-    default:
-        domain_mode = "Templates";
-    }
 
     snprintf(request, sizeof(request), "%s/api/rp/v1/%s/Folder/%s/Breadcrumbs",
         DEFAULT_SERVER,
-        domain_mode,
+        GetDomainMode(),
         GetCurrentFolder());
 
     curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, stdout);
-    curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, NULL);
+    curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, parse_working_directory_json);
     curl_easy_setopt(context->curl, CURLOPT_URL, request);
     res = curl_easy_perform(context->curl);
     if (res != CURLE_OK)
         fprintf(stderr, "curl_easy_perform() failed: %s\n",
             curl_easy_strerror(res));
+    curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, NULL);
 }
 
 static void change_directory(command_context_t * context)
@@ -558,11 +583,10 @@ static void help(command_context_t * context)
 
 void user_interface(CURL * curl)
 {
-    stop = 0;
     command_context_t       context;
     command_record_t    *   cmd_ptr;
-
-    puts("Welcome to FastReport.Cloud shell. Type 'help' to see list of builtin commands");
+    stop = 0;
+    puts("Welcome to \x1B[33mFastReport.Cloud\x1B[0m shell. Type 'help' to see list of builtin commands.");
     do {
         context.curl = curl;
         context.words_count = 0;
@@ -684,7 +708,7 @@ int main(void)
 
     strcpy(auth, "apikey:");
     if (load_token(KEY_FILE, auth) < 0) {
-        fprintf(stderr, "Unable set tocken\n");
+        fprintf(stderr, "Unable set security token\n");
         return EXIT_FAILURE;
     }
 

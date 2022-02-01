@@ -1,5 +1,9 @@
 all:
-	gcc frcloud.c jsonparser.c config.c -lgnutls -lcurl -lreadline -o frcloud
+	chmod -x *.c *.h
+	gcc -s frcloud.c jsonparser.c config.c base64.c -lgnutls -lcurl -lreadline -o frcloud
+
+debug:
+	gcc -g frcloud.c jsonparser.c config.c base64.c -lgnutls -lcurl -lreadline -o frcloud
 
 clean:
 	rm frcloud

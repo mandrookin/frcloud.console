@@ -40,4 +40,19 @@ typedef struct {
 
 int load_token(char * tokenfilename, char * auth);
 
+int draw_json_ListFolderAndFiles(char *js, size_t jslen);
+int draw_json_Breadcrumbs(char *js, size_t jslen);
+
+
+char *base64_encode(const unsigned char *data,
+    size_t input_length,
+    size_t *output_length);
+
+unsigned char *base64_decode(const char *data,
+    size_t input_length,
+    size_t *output_length);
+
+void build_decoding_table();
+void base64_cleanup();
+
 #endif
