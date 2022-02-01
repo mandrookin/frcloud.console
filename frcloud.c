@@ -6,7 +6,6 @@
 #include <string.h>
 #include <errno.h>
 
-#include <curl/curl.h>
 
 #include <readline/readline.h>
 #include <readline/history.h>
@@ -121,6 +120,10 @@ static const char const * const modes[3] = {
     "\n\x1B[32m\x1B[1mReports> \x1B[0m",
     "\n\x1B[32m\x1B[1mExports> \x1B[0m"
 };
+
+static char *line_read = (char *)NULL;
+static int  verbose = 0;
+static int stop;
 static int file_body;
 static dnld_params_t dnld_params;
 static domain_t domain = Templates;
@@ -131,9 +134,6 @@ static char  templates_root_folder[ID_BUFF_SIZE];
 static char  templates_current_folder[ID_BUFF_SIZE];
 static char  exports_root_folder[ID_BUFF_SIZE];
 static char  exports_current_folder[ID_BUFF_SIZE];
-/* A static variable for holding the line. */
-static char *line_read = (char *)NULL;
-static int  verbose = 1;
 
 static char * GetCurrentFolder()
 {
@@ -220,7 +220,7 @@ extern int draw_json_response(char *js, size_t jslen);
 uint parse_folders_and_files_json(char *in, uint size, uint nmemb, char *out)
 {
     uint r = size * nmemb;
-#if ! PAYLOAD_DEBUG
+#if PAYLOAD_DEBUG
     FILE * fp = fopen("folder.json", "w");
     fwrite(in, size, nmemb, fp);
     fclose(fp);
@@ -229,11 +229,21 @@ uint parse_folders_and_files_json(char *in, uint size, uint nmemb, char *out)
     return r;
 }
 
-void show_directory(CURL * curl, char * dir_uuid)
+void show_directory(command_context_t * context)
 {
     CURLcode res;
     char    *   domain_mode;
+    char    *   dir_uuid;
     char  url[512];
+
+    if (context->words_count == 0)
+        dir_uuid = GetCurrentFolder();
+    else if (context->words_count == 1)
+        dir_uuid = context->words[0];
+    else {
+        fprintf(stderr, "change dir command supports only one or zero arguments\n");
+        return;
+    }
 
     switch (domain)
     {
@@ -248,11 +258,11 @@ void show_directory(CURL * curl, char * dir_uuid)
         domain_mode,
         dir_uuid);
 
-    curl_easy_setopt(curl, CURLOPT_URL, url);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, parse_folders_and_files_json);
+    curl_easy_setopt(context->curl, CURLOPT_URL, url);
+    curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, parse_folders_and_files_json);
 
     /* Perform the request, res will get the return code */
-    res = curl_easy_perform(curl);
+    res = curl_easy_perform(context->curl);
     /* Check for errors */
     if (res != CURLE_OK)
         fprintf(stderr, "curl_easy_perform() failed: %s\n",
@@ -282,38 +292,44 @@ uint write_cb(char *in, uint size, uint nmemb, char *out)
     return r;
 }
 
-void download_report(CURL * curl, char * uuid)
+void download_file(command_context_t * context)
 {
     CURLcode res;
     char request[512];
+    char op;
 
-    switch (domain)
-    {
-    case Templates:
-        snprintf(request, 512, "https://fastreport.cloud/download/t/%s", uuid);
+    if (context->words_count != 1) {
+        puts("Not enough arguments. Use:\n get 60758ec7377eaa000171a5ec\n where 60758ec7377eaa000171a5ec is uuid of file");
+        return;
+    }
+
+    switch (domain) {
+    case Templates:    
+        op = 't';
         break;
     case Reports:
-        snprintf(request, 512, "https://fastreport.cloud/download/r/%s", uuid);
+        op = 'r';
         break;
     case Exports:
-        snprintf(request, 512, "https://fastreport.cloud/download/e/%s", uuid);
+        op = 'e';
         break;
     }
-    //
+    snprintf(request, 512, "https://fastreport.cloud/download/%c/%s", op, context->words[0]);
+
     // 
     struct curl_slist *headers = NULL;
     headers = curl_slist_append(headers, "Accept: text/html, application/xhtml+xml, application/xml, application/octet-stream");
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-    curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, dnld_header_parse);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_cb);
-    dnld_params.pointer_to_curl = curl;
-    curl_easy_setopt(curl, CURLOPT_HEADERDATA, &dnld_params);
-    curl_easy_setopt(curl, CURLOPT_URL, request);
+    curl_easy_setopt(context->curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(context->curl, CURLOPT_HEADERFUNCTION, dnld_header_parse);
+    curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, write_cb);
+    dnld_params.pointer_to_curl = context->curl;
+    curl_easy_setopt(context->curl, CURLOPT_HEADERDATA, &dnld_params);
+    curl_easy_setopt(context->curl, CURLOPT_URL, request);
 
     file_body = -1;
     download_size = 0;
-    res = curl_easy_perform(curl);
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, NULL);
+    res = curl_easy_perform(context->curl);
+    curl_easy_setopt(context->curl, CURLOPT_HTTPHEADER, NULL);
 
     if (file_body > 0)
     {
@@ -327,14 +343,19 @@ void download_report(CURL * curl, char * uuid)
             curl_easy_strerror(res));
 }
 
-void upload_file(CURL * curl, char * filename)
+void upload_file(command_context_t * context)
 {
-    CURLcode res;
+    CURLcode    res;
     char    *   domain_mode;
-    char request[512];
+    char    *   filename;
+    char        request[512];
 
-    if (access(filename, R_OK) == -1)
-    {
+    if (context->words_count != 1) {
+        printf("Use> put filename\n  where 'filename' is path to local file\n");
+        return;
+    }
+    filename = context->words[0];
+    if (access(filename, R_OK) == -1) {
         fprintf(stderr, "File not exist or access denied for: %s", filename);
         return;
     }
@@ -354,30 +375,36 @@ void upload_file(CURL * curl, char * filename)
 
     struct curl_slist *headers = NULL;
     headers = curl_slist_append(headers, "Content-Type: application/json-patch+json");
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-    curl_easy_setopt(curl, CURLOPT_URL, request);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, stdout);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, NULL);
+    curl_easy_setopt(context->curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(context->curl, CURLOPT_URL, request);
+    curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, stdout);
+    curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, NULL);
 
-    char * post = "{ \"name\": \"alman_second_quarter.frx\", \"content\": \"77u/PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0idXRmLTgiPz4NCjxSZXBvcnQgU2NyaXB0TGFuZ3VhZ2U9IkNTaGFycCIgUmVwb3J0SW5mby5DcmVhdGVkPSIxMi8wNC8yMDIwIDEwOjU4OjU3IiBSZXBvcnRJbmZvLk1vZGlmaWVkPSIxMi8wNC8yMDIwIDExOjAwOjIwIiBSZXBvcnRJbmZvLkNyZWF0b3JWZXJzaW9uPSIyMC4yMC40LjEiPg0KICA8RGljdGlvbmFyeS8+DQogIDxSZXBvcnRQYWdlIE5hbWU9IlBhZ2UxIiBXYXRlcm1hcmsuRm9udD0iQXJpYWwsIDYwcHQiPg0KICAgIDxSZXBvcnRUaXRsZUJhbmQgTmFtZT0iUmVwb3J0VGl0bGUxIiBXaWR0aD0iNzE4LjIiIEhlaWdodD0iMzcuOCIvPg0KICAgIDxQYWdlSGVhZGVyQmFuZCBOYW1lPSJQYWdlSGVhZGVyMSIgVG9wPSI0MSIgV2lkdGg9IjcxOC4yIiBIZWlnaHQ9IjI4LjM1Ii8+DQogICAgPERhdGFCYW5kIE5hbWU9IkRhdGExIiBUb3A9IjcyLjU1IiBXaWR0aD0iNzE4LjIiIEhlaWdodD0iNzUuNiI+DQogICAgICA8VGV4dE9iamVjdCBOYW1lPSJUZXh0MSIgV2lkdGg9IjcxOC4yIiBIZWlnaHQ9Ijc1LjYiIFRleHQ9IkhlbGxvLCBGYXN0UmVwb3J0IENsb3VkISEhIiBIb3J6QWxpZ249IkNlbnRlciIgVmVydEFsaWduPSJDZW50ZXIiIEZvbnQ9IkFyaWFsLCAxMHB0Ii8+DQogICAgPC9EYXRhQmFuZD4NCiAgICA8UGFnZUZvb3RlckJhbmQgTmFtZT0iUGFnZUZvb3RlcjEiIFRvcD0iMTUxLjM1IiBXaWR0aD0iNzE4LjIiIEhlaWdodD0iMTguOSIvPg0KICA8L1JlcG9ydFBhZ2U+DQo8L1JlcG9ydD4NCg==\"}";
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, post);
+    char * post = "{ \"name\": \"alman_remove_asap.frx\", \"content\": \"77u/PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0idXRmLTgiPz4NCjxSZXBvcnQgU2NyaXB0TGFuZ3VhZ2U9IkNTaGFycCIgUmVwb3J0SW5mby5DcmVhdGVkPSIxMi8wNC8yMDIwIDEwOjU4OjU3IiBSZXBvcnRJbmZvLk1vZGlmaWVkPSIxMi8wNC8yMDIwIDExOjAwOjIwIiBSZXBvcnRJbmZvLkNyZWF0b3JWZXJzaW9uPSIyMC4yMC40LjEiPg0KICA8RGljdGlvbmFyeS8+DQogIDxSZXBvcnRQYWdlIE5hbWU9IlBhZ2UxIiBXYXRlcm1hcmsuRm9udD0iQXJpYWwsIDYwcHQiPg0KICAgIDxSZXBvcnRUaXRsZUJhbmQgTmFtZT0iUmVwb3J0VGl0bGUxIiBXaWR0aD0iNzE4LjIiIEhlaWdodD0iMzcuOCIvPg0KICAgIDxQYWdlSGVhZGVyQmFuZCBOYW1lPSJQYWdlSGVhZGVyMSIgVG9wPSI0MSIgV2lkdGg9IjcxOC4yIiBIZWlnaHQ9IjI4LjM1Ii8+DQogICAgPERhdGFCYW5kIE5hbWU9IkRhdGExIiBUb3A9IjcyLjU1IiBXaWR0aD0iNzE4LjIiIEhlaWdodD0iNzUuNiI+DQogICAgICA8VGV4dE9iamVjdCBOYW1lPSJUZXh0MSIgV2lkdGg9IjcxOC4yIiBIZWlnaHQ9Ijc1LjYiIFRleHQ9IkhlbGxvLCBGYXN0UmVwb3J0IENsb3VkISEhIiBIb3J6QWxpZ249IkNlbnRlciIgVmVydEFsaWduPSJDZW50ZXIiIEZvbnQ9IkFyaWFsLCAxMHB0Ii8+DQogICAgPC9EYXRhQmFuZD4NCiAgICA8UGFnZUZvb3RlckJhbmQgTmFtZT0iUGFnZUZvb3RlcjEiIFRvcD0iMTUxLjM1IiBXaWR0aD0iNzE4LjIiIEhlaWdodD0iMTguOSIvPg0KICA8L1JlcG9ydFBhZ2U+DQo8L1JlcG9ydD4NCg==\"}";
+    curl_easy_setopt(context->curl, CURLOPT_POSTFIELDS, post);
 
-    res = curl_easy_perform(curl);
+    res = curl_easy_perform(context->curl);
 
     curl_slist_free_all(headers);
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, NULL);
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, NULL);
+    curl_easy_setopt(context->curl, CURLOPT_HTTPHEADER, NULL);
+    curl_easy_setopt(context->curl, CURLOPT_POSTFIELDS, NULL);
+    curl_easy_setopt(context->curl, CURLOPT_POST, 0);
 
     if (res != CURLE_OK)
         fprintf(stderr, "curl_easy_perform() failed: %s\n",
             curl_easy_strerror(res));
 }
 
-void delete_file(CURL * curl, char * uuid)
+void delete_file(command_context_t * context)
 {
     CURLcode res;
     char    *   domain_mode;
     char request[512];
+
+    if (context->words_count != 1) {
+        puts("Use rm 'uuid' to delete file. Where 'uuid' is unique identifier of file");
+        return;
+    }
 
     switch (domain)
     {
@@ -387,15 +414,15 @@ void delete_file(CURL * curl, char * uuid)
     default:
         domain_mode = "Templates";
     }
-    snprintf(request, 512, "https://fastreport.cloud/api/rp/v1/%s/File/%s", domain_mode, uuid);
+    snprintf(request, 512, "https://fastreport.cloud/api/rp/v1/%s/File/%s", domain_mode, context->words[0]);
 
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, NULL);
-    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
-    curl_easy_setopt(curl, CURLOPT_URL, request);
+    curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, NULL);
+    curl_easy_setopt(context->curl, CURLOPT_CUSTOMREQUEST, "DELETE");
+    curl_easy_setopt(context->curl, CURLOPT_URL, request);
 
-    res = curl_easy_perform(curl);
+    res = curl_easy_perform(context->curl);
 
-    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, NULL);
+    curl_easy_setopt(context->curl, CURLOPT_CUSTOMREQUEST, NULL);
 
     /* Check for errors */
     if (res != CURLE_OK)
@@ -403,24 +430,24 @@ void delete_file(CURL * curl, char * uuid)
             curl_easy_strerror(res));
 }
 
-void show_profile(CURL * curl)
+static void show_profile(command_context_t * context)
 {
     CURLcode res;
     puts("----------------------- SHOW PROFILE ----------------------\n\n");
 
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, stdout);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, NULL);
-    curl_easy_setopt(curl, CURLOPT_URL, "https://fastreport.cloud/api/manage/v1/UserProfile");
+    curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, stdout);
+    curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, NULL);
+    curl_easy_setopt(context->curl, CURLOPT_URL, "https://fastreport.cloud/api/manage/v1/UserProfile");
 
     /* Perform the request, res will get the return code */
-    res = curl_easy_perform(curl);
+    res = curl_easy_perform(context->curl);
     /* Check for errors */
     if (res != CURLE_OK)
         fprintf(stderr, "curl_easy_perform() failed: %s\n",
             curl_easy_strerror(res));
 }
 
-void show_working_dicrectory_path(CURL * curl)
+static void show_working_dicrectory_path(command_context_t * context)
 {
     CURLcode res;
     char * domain_mode;
@@ -439,114 +466,125 @@ void show_working_dicrectory_path(CURL * curl)
         domain_mode,
         GetCurrentFolder());
 
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, stdout);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, NULL);
-    curl_easy_setopt(curl, CURLOPT_URL, request);
-    res = curl_easy_perform(curl);
+    curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, stdout);
+    curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, NULL);
+    curl_easy_setopt(context->curl, CURLOPT_URL, request);
+    res = curl_easy_perform(context->curl);
     if (res != CURLE_OK)
         fprintf(stderr, "curl_easy_perform() failed: %s\n",
             curl_easy_strerror(res));
 }
 
-// --------------------- Ниже цикл в котором пользователь вводит команды -------------
+static void change_directory(command_context_t * context)
+{
+    if (context->words_count == 0)
+    {
+        puts("Current dir changed to root folder. Use folder 'uuid' as an argument for cd command to change current folder");
+        strcpy(GetCurrentFolder(), GetRootFolder());
+        return;
+    }
+    if (strlen(context->words[0]) != strlen("606335ef377eaa000171a5ba"))
+    {
+        puts("This version supports UUID only as argument. Or no argument to chnage current folder to domain's root");
+        return;
+    }
+    strcpy(GetCurrentFolder(), context->words[0]);
+    printf("Directory changed to: %s", GetCurrentFolder());
+}
+
+static void logout_cloud(command_context_t * context) 
+{ 
+    stop = 1; 
+}
+static void select_templates(command_context_t * context) 
+{ 
+    domain = Templates; 
+}
+static void select_reports(command_context_t * context) 
+{ 
+    domain = Reports; 
+}
+static void select_exports(command_context_t * context) 
+{ 
+    domain = Exports; 
+}
+static void local_dir_list(command_context_t * context)
+{
+    system("ls -l");
+}
+static void switch_verbosity(command_context_t * context)
+{
+    verbose = verbose ? 0 : 1;
+    curl_easy_setopt(context->curl, CURLOPT_VERBOSE, verbose);
+    printf("curl verbose mode set to %s", verbose ? "Enabled" : "Disabled");
+}
+
+static void help(command_context_t * context);
+
+command_record_t    commands[] = {
+    {"ls", show_directory, "show directory context"},
+    {"cd", change_directory, "change current directory by it's UUID"},
+    {"get", download_file, "download template, report or document by it's UUID"},
+    {"put", upload_file, "upload template, report or document to cloud"},
+    {"profile", show_profile, "show user profile", NULL},
+    {"pwd",     show_working_dicrectory_path, "print working directory path", NULL},
+    {"help",    help, "shows list of supported commands or comand description", NULL},
+    {"exit", logout_cloud, "exit from FRCloud console"},
+    {"templates", select_templates, "switch to templates domain"},
+    {"reports", select_reports, "switch to reports domain"},
+    {"exports", select_exports, "switch to exports domain"},
+    {"lls", local_dir_list, "list of local directory"},
+    {"rm", delete_file, "delete file by it's UUID"},
+    {"verbose", switch_verbosity, "Toggle curl verbose mode ON/OFF"},
+    {NULL, NULL, NULL, NULL}
+};
+
+static void help(command_context_t * context)
+{
+    command_record_t   * ptr = commands;
+    puts("List of supported commands:");
+    while (ptr->command_name != NULL) 
+    {
+        printf(" %-10s    %s\n", ptr->command_name, ptr->short_help);
+        ptr++;
+    }
+}
+
 void user_interface(CURL * curl)
 {
-    int stop = 0;
-    int arg_counter = 0;
-    char *  user_input;
-    char *  words[8];
+    stop = 0;
+    command_context_t       context;
+    command_record_t    *   cmd_ptr;
 
+    puts("Welcome to FastReport.Cloud shell. Type 'help' to see list of builtin commands");
     do {
-
-        arg_counter = 0;
-        user_input = readline_gets();
-        words[arg_counter] = strpbrk(user_input, " \t");
-        if (words[arg_counter] != NULL)
+        context.curl = curl;
+        context.words_count = 0;
+        context.command = readline_gets();
+        context.words[context.words_count] = strpbrk(context.command, " \t");
+        if (context.words[context.words_count] != NULL)
         {
-            *words[arg_counter] = 0;
-            words[arg_counter]++;
-            arg_counter++;
-            printf("Found arg: %s\n", words[0]);
+            *context.words[context.words_count] = 0;
+            context.words[context.words_count]++;
+            context.words_count++;
+            printf("Found arg: %s\n", context.words[0]);
         }
 
-        if (strcmp(user_input, "exit") == 0)
+        if (context.command[0] == 0)
+            continue;
+
+        for (cmd_ptr = commands; cmd_ptr->command_name; cmd_ptr++)
         {
-            stop = 1;
-            //          printf("Длина введённой строки: %ld\n", strlen(user_input));
-        }
-        else if (strcmp(user_input, "ls") == 0)
-        {
-            if (arg_counter == 0)
-                show_directory(curl, GetCurrentFolder());
-            else if (arg_counter == 1)
-                show_directory(curl, words[0]);
-        }
-        else if (strcmp(user_input, "lls") == 0)
-        {
-            system("ls -l");
-        }
-        else if (strcmp(user_input, "reports") == 0)
-        {
-            domain = Reports;
-        }
-        else if (strcmp(user_input, "templates") == 0)
-        {
-            domain = Templates;
-        }
-        else if (strcmp(user_input, "exports") == 0)
-        {
-            domain = Exports;
-        }
-        else if (strcmp(user_input, "verbose") == 0)
-        {
-            verbose = verbose ? 0 : 1;
-            curl_easy_setopt(curl, CURLOPT_VERBOSE, verbose);
-            printf("curl verbose mode set to %s", verbose ? "Enabled" : "Disabled");
-        }
-        else if (strcmp(user_input, "cd") == 0)
-        {
-            if (arg_counter != 1)
-            {
-                puts("Current dir changed to root folder. Use folder id as argument for cd command to change current folder");
-                strcpy(GetCurrentFolder(), GetRootFolder());
+            if (strcmp(context.command, cmd_ptr->command_name) != 0)
                 continue;
-            }
-            strcpy(GetCurrentFolder(), words[0]);
-            printf("Directory changed to: %s", GetCurrentFolder());
+            cmd_ptr->run(&context);
+            break;
         }
-        else if (strcmp(user_input, "rm") == 0)
-        {
-            if (arg_counter == 1)
-                delete_file(curl, words[0]);
-            else
-                puts("Use rm uuid to delete file.");
-        }
-        else if (strcmp(user_input, "pwd") == 0)
-        {
-                show_working_dicrectory_path(curl);
-        }
-        else if (strcmp(user_input, "get") == 0)
-        {
-            if (arg_counter == 1)
-            {
-                download_report(curl, words[0]);
-            }
-            else
-                download_report(curl, "60758ec7377eaa000171a5ec");
-        }
-        else if (strcmp(user_input, "put") == 0)
-        {
-            if (arg_counter != 1)
-                printf("Use> put filename\n  where 'filename' is path to local file\n");
-            else
-                upload_file(curl, words[0]);
-        }
-        else if (strcmp(user_input, "profile") == 0)
-        {
-            show_profile(curl);
-        }
-        else
-            printf("%s", user_input);
+
+        if (cmd_ptr->command_name != NULL)
+            continue;
+
+        printf("Unknown command: '%s' Type 'help' and press <Enter> to see list of built-in commands", context.command);
 
     } while (!stop);
 }
@@ -649,6 +687,7 @@ int main(void)
     curl = curl_easy_init();
     if (curl) {
         user_init(curl, auth);
+        memset(auth, 0, sizeof(auth));
         user_interface(curl);
         curl_easy_cleanup(curl);
     }
