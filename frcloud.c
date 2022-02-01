@@ -249,22 +249,36 @@ void show_directory(command_context_t * context)
 {
     CURLcode res;
     char    *   dir_uuid;
-    char  url[512];
+    char        search_pattern[128];
+    char        request[512];
 
+    search_pattern[0] = '\0';
     if (context->words_count == 0)
         dir_uuid = GetCurrentFolder();
-    else if (context->words_count == 1)
-        dir_uuid = context->words[0];
+    else if (context->words_count == 1) {
+        if (strcmp(context->command, "ls") == 0) {
+            dir_uuid = context->words[0];
+        }
+        else if (strcmp(context->command, "search") == 0) {
+            dir_uuid = GetCurrentFolder();
+            snprintf(search_pattern, sizeof(search_pattern), "?searchPattern=%s", context->words[0]);
+        }
+        else {
+            fprintf(stderr, "Unknown command extension: %s\n", context->command);
+            return;
+        }
+    }
     else {
         fprintf(stderr, "change dir command supports only one or zero arguments\n");
         return;
     }
 
 #if  1
-    snprintf(url, 512, "%s/api/rp/v1/%s/Folder/%s/ListFolderAndFiles",
+    snprintf(request, 512, "%s/api/rp/v1/%s/Folder/%s/ListFolderAndFiles%s",
         DEFAULT_SERVER,
         GetDomainMode(),
-        dir_uuid);
+        dir_uuid,
+        search_pattern);
 #else
     snprintf(url, 512, "%s/api/rp/v1/%s/Folder/%s/ListFolderAndFiles?searchPattern=b",
         DEFAULT_SERVER,
@@ -272,7 +286,7 @@ void show_directory(command_context_t * context)
         dir_uuid);
 #endif
 
-    curl_easy_setopt(context->curl, CURLOPT_URL, url);
+    curl_easy_setopt(context->curl, CURLOPT_URL, request);
     curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, parse_folders_and_files_json);
 
     /* Perform the request, res will get the return code */
@@ -431,19 +445,30 @@ void upload_file(command_context_t * context)
             curl_easy_strerror(res));
 }
 
-void delete_file(command_context_t * context)
+void delete_remote_object(command_context_t * context)
 {
     CURLcode res;
+    char * object_type;
     char request[512];
 
     if (context->words_count != 1) {
-        puts("Use rm 'uuid' to delete file. Where 'uuid' is unique identifier of file");
+        puts("Use rm/rmdir 'uuid' to delete file/directory. Where 'uuid' is unique identifier of file");
         return;
     }
 
-    snprintf(request, 512, "%s/api/rp/v1/%s/File/%s", 
+    if (strcmp(context->command, "rm") == 0)
+        object_type = "File";
+    else if (strcmp(context->command, "rmdir") == 0)
+        object_type = "Folder";
+    else {
+        fprintf(stderr, "Unknown delete command: %s\n", context->command);
+        return;
+    }
+
+    snprintf(request, 512, "%s/api/rp/v1/%s/%s/%s", 
         DEFAULT_SERVER, 
         GetDomainMode(),
+        object_type,
         context->words[0]);
 
     curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, NULL);
@@ -519,28 +544,28 @@ static void change_directory(command_context_t * context)
     }
     if (strlen(context->words[0]) != strlen("606335ef377eaa000171a5ba"))
     {
-        puts("This version supports UUID only as argument. Or no argument to chnage current folder to domain's root");
+        puts("This version supports UUID only as argument. Or no argument to change current folder to domain's root");
         return;
     }
     strcpy(GetCurrentFolder(), context->words[0]);
     printf("Directory changed to: %s", GetCurrentFolder());
 }
 
-static void logout_cloud(command_context_t * context)
-{
-    stop = 1;
-}
-static void select_templates(command_context_t * context)
-{
-    domain = Templates;
-}
-static void select_reports(command_context_t * context)
-{
-    domain = Reports;
-}
-static void select_exports(command_context_t * context)
+static void logout_cloud(command_context_t * context) 
 { 
-    domain = Exports;
+    stop = 1; 
+}
+static void select_templates(command_context_t * context) 
+{ 
+    domain = Templates; 
+}
+static void select_reports(command_context_t * context) 
+{ 
+    domain = Reports; 
+}
+static void select_exports(command_context_t * context) 
+{ 
+    domain = Exports; 
 }
 static void local_dir_list(command_context_t * context)
 {
@@ -556,18 +581,20 @@ static void switch_verbosity(command_context_t * context)
 static void help(command_context_t * context);
 
 command_record_t    commands[] = {
-    {"ls", show_directory, "show directory context"},
-    {"cd", change_directory, "change current directory by it's UUID"},
-    {"get", download_file, "download template, report or document by it's UUID"},
-    {"put", upload_file, "upload template, report or document to cloud"},
+    {"ls",      show_directory, "show directory context"},
+    {"search",  show_directory, "show directory context by mask"},
+    {"cd",      change_directory, "change current directory by it's UUID"},
+    {"get",     download_file, "download template, report or document by it's UUID"},
+    {"put",     upload_file, "upload template, report or document to cloud"},
     {"pwd",     show_working_dicrectory_path, "print working directory path", NULL},
     {"help",    help, "shows list of supported commands or comand description", NULL},
-    {"exit", logout_cloud, "exit from FRCloud console. You may also use Ctrl+d"},
-    {"templates", select_templates, "switch to templates domain"},
+    {"exit",    logout_cloud, "exit from FRCloud console. You may also use Ctrl+d"},
+    {"templates",   select_templates, "switch to templates domain"},
     {"reports", select_reports, "switch to reports domain"},
     {"exports", select_exports, "switch to exports domain"},
-    {"lls", local_dir_list, "list of local directory"},
-    {"rm", delete_file, "delete file by it's UUID"},
+    {"lls",     local_dir_list, "list of local directory"},
+    {"rm",      delete_remote_object, "delete file by it's UUID"},
+    {"rmdir",   delete_remote_object, "delete non-empty folder by it's UUID"},
     {"verbose", switch_verbosity, "Toggle curl verbose mode ON/OFF"},
     {"profile", show_profile, "show user profile", NULL},
     {NULL, NULL, NULL, NULL}
