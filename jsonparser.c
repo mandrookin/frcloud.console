@@ -162,6 +162,15 @@ static int read_frcloud_dir(const char *js, jsmntok_t *t, size_t count)
         if (!json_text_compare(js, item++, "name"))
             return -14;
         get_string(js, item++, dir.name, sizeof(dir.name));
+
+        if (json_text_compare(js, item, "tags"))
+        {
+            item++;
+            get_string(js, item, type, sizeof(type));
+            //printf("Skip tags: %s\n", type);
+            item += item->size + 1;
+        }
+
         if (!json_text_compare(js, item++, "type"))
             return -15;
         get_string(js, item++, type, sizeof(type));
@@ -177,21 +186,21 @@ static int read_frcloud_dir(const char *js, jsmntok_t *t, size_t count)
         get_string(js, item++, type, sizeof(type));
         dir.size = atoi(type);
         if (!json_text_compare(js, item++, "status"))
-            return -16;
+            return -17;
         get_string(js, item++, type, sizeof(type));
         if (!json_text_compare(js, item++, "statusReason"))
-            return -16;
+            return -18;
         get_string(js, item++, type, sizeof(type));
         if (!json_text_compare(js, item++, "id"))
-            return -14;
+            return -19;
         get_string(js, item++, dir.id, sizeof(dir.id));
         if (!json_text_compare(js, item++, "createdTime"))
-            return -14;
+            return -20;
         get_string(js, item++, dir.create, sizeof(dir.create));
         dir.create[10] = ' ';
         dir.create[19] = 0;
         if (!json_text_compare(js, item++, "editedTime"))
-            return -14;
+            return -21;
         get_string(js, item++, dir.edited, sizeof(dir.edited));
         dir.edited[10] = ' ';
         dir.edited[19] = 0;
@@ -206,17 +215,17 @@ static int read_frcloud_dir(const char *js, jsmntok_t *t, size_t count)
     }
 
     if (!json_text_compare(js, item++, "count"))
-        return -15;
+        return -22;
     get_string(js, item++, type, sizeof(type));
     int total = atoi(type);
 
     if (!json_text_compare(js, item++, "skip"))
-        return -15;
+        return -23;
     get_string(js, item++, type, sizeof(type));
     int skip = atoi(type);
 
     if (!json_text_compare(js, item++, "take"))
-        return -15;
+        return -24;
     get_string(js, item++, type, sizeof(type));
     int take = atoi(type);
 
@@ -264,15 +273,18 @@ again:
 int draw_json_ListFolderAndFiles(char *js, size_t jslen)
 {
     int eof_expected = 0;
-    int count;
+    int count, status;
 
     jsmntok_t * tok = prepare_json(js, jslen, &count);
 
     if (tok != NULL) {
         // dump(js, tok, count, 0, alloca(1024));
-        read_frcloud_dir(js, tok, count);
+        status = read_frcloud_dir(js, tok, count);
         free(tok);
-        eof_expected = 1;
+        if (status < 0)
+            printf("JSON parser return error: %d\n", status);
+        else
+            eof_expected = 1;
     }
     return eof_expected;
 }

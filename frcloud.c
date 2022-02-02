@@ -314,7 +314,7 @@ static void prepare_report(command_context_t * context)
 
     if (context->received_json_size > 0)
     {
-        char * json_stream = alloca(context->received_json_size);
+        char * json_stream = alloca(context->received_json_size+1);
         char * ptr = json_stream;
         int check_counter = context->received_json_size;
 
@@ -327,7 +327,6 @@ static void prepare_report(command_context_t * context)
             free(context->json_chunks_head);
             context->json_chunks_head = context->json_chunks_tail;
         }
-
         json_ReportInfo(json_stream, context->received_json_size, context);
     }
 }
@@ -401,12 +400,14 @@ void show_directory(command_context_t * context)
             context->json_chunks_head = context->json_chunks_tail;
         }
 
+//        json_stream[context->received_json_size] = 0;
+//        puts(json_stream);
+
         draw_json_ListFolderAndFiles(json_stream, context->received_json_size);
     }
     else {
         printf("Folder '%s' is empty\n", dir_uuid);
     }
-
 }
 
 /* curl write callback, to fill tidy's input buffer...  */
@@ -639,6 +640,48 @@ static void delete_remote_object(command_context_t * context)
             curl_easy_strerror(res));
 }
 
+static void create_folder(command_context_t * context)
+{
+#define CREATE_BUFF_SIZE 4096
+    CURLcode res;
+    char request[512];
+
+    if (context->words_count != 1) {
+        printf("Use> mkdir name\n  where 'name' is a folder name\n");
+        return;
+    }
+
+    char * filename = context->words[0];
+    snprintf(request, sizeof(request), "%s/api/rp/v1/%s/Folder/%s/Folder",
+        DEFAULT_SERVER,
+        GetDomainMode(),
+        GetCurrentFolder());
+
+    char * post = alloca(CREATE_BUFF_SIZE);
+    snprintf(post, CREATE_BUFF_SIZE,
+        "{ \"name\": \"%s\", \"tags\" : [ \"%s\" ], \"icon\" : \"%s\" }",
+        filename, "console", "help");
+
+    curl_easy_setopt(context->curl, CURLOPT_POSTFIELDS, post);
+
+    struct curl_slist *headers = NULL;
+    headers = curl_slist_append(headers, "Content-Type: application/json-patch+json");
+    curl_easy_setopt(context->curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(context->curl, CURLOPT_URL, request);
+    curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, stdout);
+    //////////curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, context);
+
+    res = curl_easy_perform(context->curl);
+    if (res != CURLE_OK)
+        fprintf(stderr, "curl_easy_perform() failed: %s\n",
+            curl_easy_strerror(res));
+
+    curl_slist_free_all(headers);
+    curl_easy_setopt(context->curl, CURLOPT_HTTPHEADER, NULL);
+    curl_easy_setopt(context->curl, CURLOPT_POSTFIELDS, NULL);
+    curl_easy_setopt(context->curl, CURLOPT_POST, 0);
+}
+
 static void show_profile(command_context_t * context)
 {
     CURLcode res;
@@ -771,6 +814,7 @@ command_record_t    commands[] = {
     {"profile", show_profile, "show user profile", NULL},
     {"lls",     local_dir_list, "list of local directory", NULL},
     {"rm",      delete_remote_object, "delete file by it's UUID", NULL},
+    {"mkdir",   create_folder, "creaate folder", NULL},
     {"rmdir",   delete_remote_object, "delete non-empty folder by it's UUID", NULL },
     {"verbose", switch_verbosity, "toggle curl verbose mode ON/OFF", NULL},
     {"limit",   list_screen_limit, "show/set max count of items of 'ls' and 'search' commands", NULL},
