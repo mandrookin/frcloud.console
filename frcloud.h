@@ -28,6 +28,9 @@ typedef struct {
     char    *   command;
     char    *   words[8];
     int         words_count;
+    uint                         received_json_size;
+    json_chunk_header_t    *     json_chunks_head;
+    json_chunk_header_t    *     json_chunks_tail;
 } command_context_t;
 
 typedef void(*cloud_command_t)(command_context_t *);

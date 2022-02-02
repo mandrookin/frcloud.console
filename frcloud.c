@@ -126,6 +126,7 @@ static int file_body;
 static dnld_params_t dnld_params;
 static domain_t domain = Templates;
 static int   download_size;
+
 static char  reports_root_folder[ID_BUFF_SIZE];
 static char  reports_current_folder[ID_BUFF_SIZE];
 static char  templates_root_folder[ID_BUFF_SIZE];
@@ -238,7 +239,7 @@ static void prepare_report(command_context_t * context)
     char        request[512];
 
     if (context->words_count != 1) {
-        puts("Not enough arguments. Use:\n> get 60758ec7377eaa000171a5ec\nwhere 60758ec7377eaa000171a5ec is uuid of template");
+        puts("Not enough arguments. Use:\n> get 60758ec7377eaa000171a5ec\nwhere '60758ec7377eaa000171a5ec' is uuid of template");
         return;
     }
     
@@ -274,13 +275,10 @@ static void prepare_report(command_context_t * context)
             curl_easy_strerror(res));
 }
 
-static uint                         received_json_size;
-static json_chunk_header_t    *     json_chunks_head;
-static json_chunk_header_t    *     json_chunks_tail;
-
 static uint parse_folders_and_files_json(char *in, uint size, uint nmemb, char *out)
 {
     uint r = size * nmemb;
+    command_context_t * context = (command_context_t*)out;
 
 #if PAYLOAD_DEBUG
     FILE * fp = fopen("folder.json", "w+");
@@ -297,15 +295,15 @@ static uint parse_folders_and_files_json(char *in, uint size, uint nmemb, char *
     chunk->next_chunk = NULL;
     chunk->size = r;
     memcpy(chunk + 1, in, r);
-    received_json_size += r;
+    context->received_json_size += r;
 
-    if (json_chunks_head == NULL)
-        json_chunks_head = chunk;
+    if (context->json_chunks_head == NULL)
+        context->json_chunks_head = chunk;
     else
-        json_chunks_tail->next_chunk = chunk;
-    json_chunks_tail = chunk;
+        context->json_chunks_tail->next_chunk = chunk;
+    context->json_chunks_tail = chunk;
 
-//    printf("Receive chunk %d bytes. Total %d bytes\n", r, received_json_size);
+//    printf("Receive chunk %d bytes. Total %d bytes\n", r, context->received_json_size);
     return r;
 }
 
@@ -318,7 +316,7 @@ void show_directory(command_context_t * context)
 
     search_pattern[0] = '\0';
     if (context->words_count == 0) {
-        strcpy(search_pattern, "?skip=0&take=20");
+        strcpy(search_pattern, "?skip=0&take=12");
         dir_uuid = GetCurrentFolder();
     }
     else if (context->words_count == 1) {
@@ -348,35 +346,37 @@ void show_directory(command_context_t * context)
     curl_easy_setopt(context->curl, CURLOPT_URL, request);
     curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, parse_folders_and_files_json);
 
-    received_json_size = 0;
-    json_chunks_head = NULL;
-    json_chunks_tail = NULL;
+    context->received_json_size = 0;
+    context->json_chunks_head = NULL;
+    context->json_chunks_tail = NULL;
+
+    curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, context);
 
     res = curl_easy_perform(context->curl);
     if (res != CURLE_OK)
         fprintf(stderr, "curl_easy_perform() failed: %s\n",
             curl_easy_strerror(res));
 
-    if (received_json_size > 0)
+    if (context->received_json_size > 0)
     {
-        char * json_stream = alloca(received_json_size);
+        char * json_stream = alloca(context->received_json_size);
         char * ptr = json_stream;
-        int check_counter = received_json_size;
+        int check_counter = context->received_json_size;
 
-        while (json_chunks_head) {
-            memcpy(ptr, json_chunks_head + 1, json_chunks_head->size);
-            ptr += json_chunks_head->size;
-            check_counter -= json_chunks_head->size;
+        while (context->json_chunks_head) {
+            memcpy(ptr, context->json_chunks_head + 1, context->json_chunks_head->size);
+            ptr += context->json_chunks_head->size;
+            check_counter -= context->json_chunks_head->size;
 //            printf("Append chunk %d bytes\n", json_chunks_head->size);
-            json_chunks_tail = json_chunks_head->next_chunk;
-            free(json_chunks_head);
-            json_chunks_head = json_chunks_tail;
+            context->json_chunks_tail = context->json_chunks_head->next_chunk;
+            free(context->json_chunks_head);
+            context->json_chunks_head = context->json_chunks_tail;
         }
 
-        draw_json_ListFolderAndFiles(json_stream, received_json_size);
+        draw_json_ListFolderAndFiles(json_stream, context->received_json_size);
     }
     else {
-        printf("Folder is empty\n");
+        printf("Folder '%s' is empty\n", dir_uuid);
     }
 
 }
