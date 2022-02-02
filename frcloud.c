@@ -231,6 +231,39 @@ char * readline_gets()
     return (line_ptr);
 }
 
+static uint write_json_junk(char *in, uint size, uint nmemb, char *out)
+{
+    uint r = size * nmemb;
+    command_context_t * context = (command_context_t*)out;
+
+#if PAYLOAD_DEBUG
+    FILE * fp = fopen("folder.json", "w+");
+    fwrite(in, size, nmemb, fp);
+    fclose(fp);
+#endif
+
+    json_chunk_header_t    *    chunk = malloc(r + sizeof(json_chunk_header_t));
+    if (chunk == NULL) {
+        fprintf(stderr, "Unable allocate memory for json chunk\n");
+        return 0;
+    }
+
+    chunk->next_chunk = NULL;
+    chunk->size = r;
+    memcpy(chunk + 1, in, r);
+    context->received_json_size += r;
+
+    if (context->json_chunks_head == NULL)
+        context->json_chunks_head = chunk;
+    else
+        context->json_chunks_tail->next_chunk = chunk;
+    context->json_chunks_tail = chunk;
+
+    //    printf("Receive chunk %d bytes. Total %d bytes\n", r, context->received_json_size);
+    return r;
+}
+
+
 static void prepare_report(command_context_t * context)
 {
     CURLcode    res;
@@ -261,48 +294,42 @@ static void prepare_report(command_context_t * context)
 
     curl_easy_setopt(context->curl, CURLOPT_POSTFIELDS, post);
 
+    curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, write_json_junk);
+
+    context->received_json_size = 0;
+    context->json_chunks_head = NULL;
+    context->json_chunks_tail = NULL;
+
+    curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, context);
+
     res = curl_easy_perform(context->curl);
+    if (res != CURLE_OK)
+        fprintf(stderr, "curl_easy_perform() failed: %s\n",
+            curl_easy_strerror(res));
 
     curl_slist_free_all(headers);
     curl_easy_setopt(context->curl, CURLOPT_HTTPHEADER, NULL);
     curl_easy_setopt(context->curl, CURLOPT_POSTFIELDS, NULL);
     curl_easy_setopt(context->curl, CURLOPT_POST, 0);
 
-    if (res != CURLE_OK)
-        fprintf(stderr, "curl_easy_perform() failed: %s\n",
-            curl_easy_strerror(res));
-}
+    if (context->received_json_size > 0)
+    {
+        char * json_stream = alloca(context->received_json_size);
+        char * ptr = json_stream;
+        int check_counter = context->received_json_size;
 
-static uint parse_folders_and_files_json(char *in, uint size, uint nmemb, char *out)
-{
-    uint r = size * nmemb;
-    command_context_t * context = (command_context_t*)out;
+        while (context->json_chunks_head) {
+            memcpy(ptr, context->json_chunks_head + 1, context->json_chunks_head->size);
+            ptr += context->json_chunks_head->size;
+            check_counter -= context->json_chunks_head->size;
+            //            printf("Append chunk %d bytes\n", json_chunks_head->size);
+            context->json_chunks_tail = context->json_chunks_head->next_chunk;
+            free(context->json_chunks_head);
+            context->json_chunks_head = context->json_chunks_tail;
+        }
 
-#if PAYLOAD_DEBUG
-    FILE * fp = fopen("folder.json", "w+");
-    fwrite(in, size, nmemb, fp);
-    fclose(fp);
-#endif
-
-    json_chunk_header_t    *    chunk = malloc(r + sizeof(json_chunk_header_t));
-    if (chunk == NULL) {
-        fprintf(stderr, "Unable allocate memory for json chunk\n");
-        return 0;
+        json_ReportInfo(json_stream, context->received_json_size, context);
     }
-
-    chunk->next_chunk = NULL;
-    chunk->size = r;
-    memcpy(chunk + 1, in, r);
-    context->received_json_size += r;
-
-    if (context->json_chunks_head == NULL)
-        context->json_chunks_head = chunk;
-    else
-        context->json_chunks_tail->next_chunk = chunk;
-    context->json_chunks_tail = chunk;
-
-    //    printf("Receive chunk %d bytes. Total %d bytes\n", r, context->received_json_size);
-    return r;
 }
 
 void show_directory(command_context_t * context)
@@ -345,7 +372,7 @@ void show_directory(command_context_t * context)
         search_pattern);
 
     curl_easy_setopt(context->curl, CURLOPT_URL, request);
-    curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, parse_folders_and_files_json);
+    curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, write_json_junk);
 
     context->received_json_size = 0;
     context->json_chunks_head = NULL;
@@ -408,13 +435,21 @@ static uint write_cb(char *in, uint size, uint nmemb, char *out)
 static void download_file(command_context_t * context)
 {
     CURLcode res;
+    char * uuid = NULL;
     char request[512];
     char op;
 
-    if (context->words_count != 1) {
-        puts("Not enough arguments. Use:\n get 60758ec7377eaa000171a5ec\n where 60758ec7377eaa000171a5ec is uuid of file");
-        return;
+    if (context->words_count == 0) {
+        if (context->active_object_uuid[0] == 0) {
+            puts("Active object is not available yet");
+            return;
+        }
+        // Take UUID from resuilt of previous command
+        printf("UUID: %s\n", context->active_object_uuid);
+        uuid = context->active_object_uuid;
     }
+    else // requires switch domain
+        uuid = context->words[0];
 
     switch (domain) {
     case Templates:
@@ -427,7 +462,7 @@ static void download_file(command_context_t * context)
         op = 'e';
         break;
     }
-    snprintf(request, 512, "%s/download/%c/%s", DEFAULT_SERVER, op, context->words[0]);
+    snprintf(request, 512, "%s/download/%c/%s", DEFAULT_SERVER, op, uuid);
 
     // 
     struct curl_slist *headers = NULL;
@@ -477,13 +512,6 @@ static void upload_file(command_context_t * context)
         GetDomainMode(),
         GetCurrentFolder());
 
-    struct curl_slist *headers = NULL;
-    headers = curl_slist_append(headers, "Content-Type: application/json-patch+json");
-    curl_easy_setopt(context->curl, CURLOPT_HTTPHEADER, headers);
-    curl_easy_setopt(context->curl, CURLOPT_URL, request);
-    curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, stdout);
-    curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, NULL);
-
     size_t encoded_size;
 
     //    Priliminary code. Limit file size to buffer size
@@ -518,16 +546,47 @@ static void upload_file(command_context_t * context)
 
     curl_easy_setopt(context->curl, CURLOPT_POSTFIELDS, post);
 
+    struct curl_slist *headers = NULL;
+    headers = curl_slist_append(headers, "Content-Type: application/json-patch+json");
+    curl_easy_setopt(context->curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(context->curl, CURLOPT_URL, request);
+    curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, stdout);
+    curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, write_json_junk);
+
+    context->received_json_size = 0;
+    context->json_chunks_head = NULL;
+    context->json_chunks_tail = NULL;
+
+    curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, context);
+
     res = curl_easy_perform(context->curl);
+    if (res != CURLE_OK)
+        fprintf(stderr, "curl_easy_perform() failed: %s\n",
+            curl_easy_strerror(res));
 
     curl_slist_free_all(headers);
     curl_easy_setopt(context->curl, CURLOPT_HTTPHEADER, NULL);
     curl_easy_setopt(context->curl, CURLOPT_POSTFIELDS, NULL);
     curl_easy_setopt(context->curl, CURLOPT_POST, 0);
 
-    if (res != CURLE_OK)
-        fprintf(stderr, "curl_easy_perform() failed: %s\n",
-            curl_easy_strerror(res));
+    if (context->received_json_size > 0)
+    {
+        char * json_stream = alloca(context->received_json_size);
+        char * ptr = json_stream;
+        int check_counter = context->received_json_size;
+
+        while (context->json_chunks_head) {
+            memcpy(ptr, context->json_chunks_head + 1, context->json_chunks_head->size);
+            ptr += context->json_chunks_head->size;
+            check_counter -= context->json_chunks_head->size;
+            //            printf("Append chunk %d bytes\n", json_chunks_head->size);
+            context->json_chunks_tail = context->json_chunks_head->next_chunk;
+            free(context->json_chunks_head);
+            context->json_chunks_head = context->json_chunks_tail;
+        }
+
+        json_ReportInfo(json_stream, context->received_json_size, context);
+    }
 }
 
 static void delete_remote_object(command_context_t * context)
@@ -685,24 +744,26 @@ static void list_screen_limit(command_context_t * context)
 
 static void help(command_context_t * context);
 
+#include "help_rus.h"
+
 command_record_t    commands[] = {
-    {"help",    help, "shows list of supported commands or command description", NULL},
-    {"prepare", prepare_report, "prepare report by it's UUID"},
-    {"ls",      show_directory, "show directory context"},
-    {"search",  show_directory, "show directory context by mask"},
-    {"cd",      change_directory, "change current directory by it's UUID"},
-    {"get",     download_file, "download template, report or document by it's UUID"},
-    {"put",     upload_file, "upload template, report or document to cloud"},
+    {"help",    help, "shows list of supported commands or command description", HELP_HELP},
+    {"prepare", prepare_report, "prepare report by it's UUID", NULL},
+    {"ls",      show_directory, "show directory context", NULL},
+    {"search",  show_directory, "show directory context by mask", NULL},
+    {"cd",      change_directory, "change current directory by it's UUID", NULL},
+    {"get",     download_file, "download template, report or document by it's UUID", NULL},
+    {"put",     upload_file, "upload template, report or document to cloud", NULL},
     {"pwd",     show_working_dicrectory_path, "print working directory path", NULL},
-    {"exit",    logout_cloud, "exit from FRCloud console. You may also use Ctrl+d"},
-    {"templates",   select_templates, "switch to templates domain"},
-    {"reports", select_reports, "switch to reports domain"},
-    {"exports", select_exports, "switch to exports domain"},
+    {"exit",    logout_cloud, "exit from FastReport.Cloud console. See help", HELP_EXIT},
+    {"templates",   select_templates, "switch to templates domain", NULL},
+    {"reports", select_reports, "switch to reports domain", NULL},
+    {"exports", select_exports, "switch to exports domain", NULL},
     {"profile", show_profile, "show user profile", NULL},
-    {"lls",     local_dir_list, "list of local directory"},
-    {"rm",      delete_remote_object, "delete file by it's UUID"},
-    {"rmdir",   delete_remote_object, "delete non-empty folder by it's UUID"},
-    {"verbose", switch_verbosity, "toggle curl verbose mode ON/OFF"},
+    {"lls",     local_dir_list, "list of local directory", NULL},
+    {"rm",      delete_remote_object, "delete file by it's UUID", NULL},
+    {"rmdir",   delete_remote_object, "delete non-empty folder by it's UUID", NULL },
+    {"verbose", switch_verbosity, "toggle curl verbose mode ON/OFF", NULL},
     {"limit",   list_screen_limit, "show/set max count of items of 'ls' and 'search' commands", NULL},
     {NULL, NULL, NULL, NULL}
 };
@@ -710,12 +771,26 @@ command_record_t    commands[] = {
 static void help(command_context_t * context)
 {
     command_record_t   * ptr = commands;
-    printf("List of supported commands:");
-    while (ptr->command_name != NULL)
-    {
-        
-        printf("\n\x1B[33m\x1B[1m %-10s\x1B[0m    %s", ptr->command_name, ptr->short_help);
-        ptr++;
+    if (context->words_count == 1) {
+        while (ptr->command_name != NULL) {
+            if (strcmp(ptr->command_name, context->words[0]) != 0) {
+                ptr++;
+                continue;
+            }
+            if (ptr->long_help)
+                puts(ptr->long_help);
+            else
+                printf("Help not found.\n%s - %s", ptr->command_name, ptr->short_help);
+            break;
+        }
+    }
+    else {
+        printf("List of supported commands:");
+        while (ptr->command_name != NULL) {
+
+            printf("\n\x1B[33m\x1B[1m %-10s\x1B[0m    %s", ptr->command_name, ptr->short_help);
+            ptr++;
+        }
     }
 }
 

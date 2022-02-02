@@ -51,6 +51,7 @@ int load_token(char * tokenfilename, char * auth);
 
 int draw_json_ListFolderAndFiles(char *js, size_t jslen);
 int draw_json_Breadcrumbs(char *js, size_t jslen);
+int json_ReportInfo(char *js, size_t jslen, command_context_t * context);
 
 
 char *base64_encode(const unsigned char *data,

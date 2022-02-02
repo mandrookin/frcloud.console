@@ -7,6 +7,8 @@
 #include <string.h>
 //#include <unistd.h>
 
+#include "frcloud.h"
+
 /* Function realloc_it() is a wrapper function for standard realloc()
  * with one difference - it frees old memory pointer in case of realloc
  * failure. Thus, DO NOT use old data pointer in anyway after call to
@@ -41,19 +43,19 @@ static int dump(const char *js, jsmntok_t *t, size_t count, int indent, char * h
     }
     int len = t->end - t->start;
     if (t->type == JSMN_PRIMITIVE) {
-        //printf("%.*s", len, js + t->start);
+        printf("%.*s", len, js + t->start);
         memcpy(holder, js + t->start, len);
         holder[len] = 0;
         return 1;
     }
     else if (t->type == JSMN_STRING) {
-        //printf("'%.*s'", len, js + t->start);
+        printf("'%.*s'", len, js + t->start);
         memcpy(holder, js + t->start, len);
         holder[len] = 0;
         return 1;
     }
     else if (t->type == JSMN_OBJECT) {
-        printf("\n");
+        //printf("\n");
         j = 0;
         for (i = 0; i < t->size; i++) {
             for (k = 0; k < indent; k++) {
@@ -62,10 +64,11 @@ static int dump(const char *js, jsmntok_t *t, size_t count, int indent, char * h
             key = t + 1 + j;
             j += dump(js, key, count - j, indent + 1, name);
             if (key->size > 0) {
-                //printf(": ");
+                printf(": ");
                 j += dump(js, t + 1 + j, count - j, indent + 1, value);
             }
-            printf("%s: %s\n", name, value);
+            puts("");
+//            printf("%s: %s\n", name, value);
         }
         return j + 1;
     }
@@ -330,3 +333,33 @@ int draw_json_Breadcrumbs(char *js, size_t jslen)
     return eof_expected;
 }
 
+int json_ReportInfo(char *js, size_t jslen, command_context_t * context)
+{
+#if FALSE // TODO: parse report info
+    int i, k;
+    int eof_expected = 0;
+    int count;
+
+    jsmntok_t * tok = prepare_json(js, jslen, &count);
+    jsmntok_t * t = tok;
+
+    dump(js, tok, count, 0, alloca(1024));
+    for (i = 0; i < count; i++)
+        printf(" JSON[%d].type = %d size = %d\n", i, tok[i].type, tok[i].size);
+#else
+    // Just take ID of operation
+    do {
+        if (!jslen) break;
+        js[jslen--] = 0;
+        char * ptr = strstr(js, "\"id\":\"");
+        if (!ptr) break;
+        ptr += 6;
+        char * end = strchr(ptr, '"');
+        if (!end || (end-ptr != 24)) break;
+        *end = 0;
+        printf("ID = %s\n", ptr);
+        strcpy(context->active_object_uuid, ptr);
+    } while (0);
+    return 0;
+#endif
+}
