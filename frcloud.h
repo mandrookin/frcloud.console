@@ -13,12 +13,13 @@ typedef unsigned long uint64_t;
 
 typedef struct {
     char        remote_fname[4096];
-    void    *   pointer_to_curl;
-//    char        url[4096];
-//    FILE        *stream;
-//    FILE        *dbg_stream;
-//    uint64_t    file_sz;
+    void    *   curl;
 } dnld_params_t;
+
+typedef struct json_chunk_header {
+    struct json_chunk_header    *   next_chunk;
+    int                             size;
+} json_chunk_header_t;
 
 typedef enum { Templates, Reports, Exports} domain_t;
 

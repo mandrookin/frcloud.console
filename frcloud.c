@@ -178,7 +178,7 @@ size_t dnld_header_parse(void *hdr, size_t size, size_t nmemb, void *userdata)
     char const*const cdtag = "Content-disposition:";
 
     int http_code;
-    curl_easy_getinfo(dnld_params->pointer_to_curl, CURLINFO_RESPONSE_CODE, &http_code);
+    curl_easy_getinfo(dnld_params->curl, CURLINFO_RESPONSE_CODE, &http_code);
     if (http_code != 200)
     {
         fprintf(stderr, "Request error code: %d\n", http_code);
@@ -274,15 +274,38 @@ static void prepare_report(command_context_t * context)
             curl_easy_strerror(res));
 }
 
+static uint                         received_json_size;
+static json_chunk_header_t    *     json_chunks_head;
+static json_chunk_header_t    *     json_chunks_tail;
+
 static uint parse_folders_and_files_json(char *in, uint size, uint nmemb, char *out)
 {
     uint r = size * nmemb;
+
 #if PAYLOAD_DEBUG
-    FILE * fp = fopen("folder.json", "w");
+    FILE * fp = fopen("folder.json", "w+");
     fwrite(in, size, nmemb, fp);
     fclose(fp);
 #endif
-    draw_json_ListFolderAndFiles(in, r);
+
+    json_chunk_header_t    *    chunk = malloc(r + sizeof(json_chunk_header_t));
+    if (chunk == NULL) {
+        fprintf(stderr, "Unable allocate memory for json chunk\n");
+        return 0;
+    }
+
+    chunk->next_chunk = NULL;
+    chunk->size = r;
+    memcpy(chunk + 1, in, r);
+    received_json_size += r;
+
+    if (json_chunks_head == NULL)
+        json_chunks_head = chunk;
+    else
+        json_chunks_tail->next_chunk = chunk;
+    json_chunks_tail = chunk;
+
+//    printf("Receive chunk %d bytes. Total %d bytes\n", r, received_json_size);
     return r;
 }
 
@@ -294,15 +317,17 @@ void show_directory(command_context_t * context)
     char        request[512];
 
     search_pattern[0] = '\0';
-    if (context->words_count == 0)
+    if (context->words_count == 0) {
+        strcpy(search_pattern, "?skip=0&take=20");
         dir_uuid = GetCurrentFolder();
+    }
     else if (context->words_count == 1) {
         if (strcmp(context->command, "ls") == 0) {
             dir_uuid = context->words[0];
         }
         else if (strcmp(context->command, "search") == 0) {
             dir_uuid = GetCurrentFolder();
-            snprintf(search_pattern, sizeof(search_pattern), "?searchPattern=%s", context->words[0]);
+            snprintf(search_pattern, sizeof(search_pattern), "?skip=0&take=20&searchPattern=%s", context->words[0]);
         }
         else {
             fprintf(stderr, "Unknown command extension: %s\n", context->command);
@@ -323,12 +348,37 @@ void show_directory(command_context_t * context)
     curl_easy_setopt(context->curl, CURLOPT_URL, request);
     curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, parse_folders_and_files_json);
 
-    /* Perform the request, res will get the return code */
+    received_json_size = 0;
+    json_chunks_head = NULL;
+    json_chunks_tail = NULL;
+
     res = curl_easy_perform(context->curl);
-    /* Check for errors */
     if (res != CURLE_OK)
         fprintf(stderr, "curl_easy_perform() failed: %s\n",
             curl_easy_strerror(res));
+
+    if (received_json_size > 0)
+    {
+        char * json_stream = alloca(received_json_size);
+        char * ptr = json_stream;
+        int check_counter = received_json_size;
+
+        while (json_chunks_head) {
+            memcpy(ptr, json_chunks_head + 1, json_chunks_head->size);
+            ptr += json_chunks_head->size;
+            check_counter -= json_chunks_head->size;
+//            printf("Append chunk %d bytes\n", json_chunks_head->size);
+            json_chunks_tail = json_chunks_head->next_chunk;
+            free(json_chunks_head);
+            json_chunks_head = json_chunks_tail;
+        }
+
+        draw_json_ListFolderAndFiles(json_stream, received_json_size);
+    }
+    else {
+        printf("Folder is empty\n");
+    }
+
 }
 
 /* curl write callback, to fill tidy's input buffer...  */
@@ -384,7 +434,7 @@ static void download_file(command_context_t * context)
     curl_easy_setopt(context->curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(context->curl, CURLOPT_HEADERFUNCTION, dnld_header_parse);
     curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, write_cb);
-    dnld_params.pointer_to_curl = context->curl;
+    dnld_params.curl = context->curl;
     curl_easy_setopt(context->curl, CURLOPT_HEADERDATA, &dnld_params);
     curl_easy_setopt(context->curl, CURLOPT_URL, request);
 
