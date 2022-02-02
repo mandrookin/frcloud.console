@@ -514,23 +514,32 @@ static void upload_file(command_context_t * context)
 
     size_t encoded_size;
 
-    //    Priliminary code. Limit file size to buffer size
-
-    char input[1024 * 3];
-
     int source_file = open(filename, O_RDONLY);
     if (source_file < 0) {
         fprintf(stderr, "Unable open source file: %s", filename);
         return;
     }
-    int source_size = read(source_file, input, sizeof(input));
-    if (source_file < 0) {
+    int source_len = lseek(source_file, 0, SEEK_END);
+    lseek(source_file, 0, SEEK_SET);
+    if (source_len > 30 * 1024)
+    {
+        printf("Source file size exceeds 30Kb size limmit\n");
+    }
+
+    char * input = alloca(source_len);
+    if (input == NULL)
+    {
+        fprintf(stderr, "Unable allocate memory on stack\n");
+        return;
+    }
+    int source_size = read(source_file, input, source_len);
+    close(source_file);
+    if (source_size < 0) {
         fprintf(stderr, "Unable read source file: %s", filename);
         return;
     }
-    close(source_file);
-    if (source_size > sizeof(input)) {
-        fprintf(stderr, "Current version limit upload size to %ld bytes\n", sizeof(input));
+    if (source_size != source_len) {
+        fprintf(stderr, "Unable read (%d != %d) source file: %s", source_size, source_len, filename);
         return;
     }
 
