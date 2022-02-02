@@ -319,7 +319,7 @@ int draw_json_Breadcrumbs(char *js, size_t jslen)
                 for (k = 0; k < i; k++) {
                     printf("    ");
                 }
-                printf("\x1B[33m%s\x1B[0m (%s)\n", name, id);
+                printf("\x1B[33m\x1B[1m%s\x1B[0m (%s)\n", name, id);
             }
 
             free(tok);

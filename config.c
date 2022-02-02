@@ -22,7 +22,7 @@ int load_token(char * tokenfilename, char * auth)
         key_token = readline(
             "Security token not found. You may enter token now and it will be stored to "
             KEY_FILE
-            " file in current directory.\nPress enter without input to exit console now.\nToken>");
+            " file in current directory.\nPress enter without input to exit console now.\n\x1B[32m\x1B[32m\x1B[1mToken> \x1B[0m");
         if (key_token == NULL) {
             fprintf(stderr, "Programm aborted by what?\n");
             return -1;

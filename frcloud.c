@@ -112,8 +112,6 @@ bail:
     return ret;
 }
 
-#define ID_BUFF_SIZE  26
-
 static const char const * const modes[3] = {
     "\n\x1B[32m\x1B[1mTemplates> \x1B[0m",
     "\n\x1B[32m\x1B[1mReports> \x1B[0m",
@@ -226,7 +224,7 @@ char * readline_gets()
     {
         while (isspace(*line_ptr))
             line_ptr++;
-        if(*line_ptr)
+        if (*line_ptr)
             add_history(line_ptr);
     }
 
@@ -239,10 +237,10 @@ static void prepare_report(command_context_t * context)
     char        request[512];
 
     if (context->words_count != 1) {
-        puts("Not enough arguments. Use:\n> get 60758ec7377eaa000171a5ec\nwhere '60758ec7377eaa000171a5ec' is uuid of template");
+        puts("Not enough arguments. Use:\n> prepare 60758ec7377eaa000171a5ec\nwhere '60758ec7377eaa000171a5ec' is uuid of template");
         return;
     }
-    
+
     snprintf(request, 512, "%s/api/rp/v1/Templates/File/%s/Prepare",
         DEFAULT_SERVER,
         context->words[0]);
@@ -303,7 +301,7 @@ static uint parse_folders_and_files_json(char *in, uint size, uint nmemb, char *
         context->json_chunks_tail->next_chunk = chunk;
     context->json_chunks_tail = chunk;
 
-//    printf("Receive chunk %d bytes. Total %d bytes\n", r, context->received_json_size);
+    //    printf("Receive chunk %d bytes. Total %d bytes\n", r, context->received_json_size);
     return r;
 }
 
@@ -316,7 +314,8 @@ void show_directory(command_context_t * context)
 
     search_pattern[0] = '\0';
     if (context->words_count == 0) {
-        strcpy(search_pattern, "?skip=0&take=12");
+        snprintf(search_pattern, sizeof(search_pattern), "?skip=0&take=%u",
+            context->take_count);
         dir_uuid = GetCurrentFolder();
     }
     else if (context->words_count == 1) {
@@ -325,7 +324,9 @@ void show_directory(command_context_t * context)
         }
         else if (strcmp(context->command, "search") == 0) {
             dir_uuid = GetCurrentFolder();
-            snprintf(search_pattern, sizeof(search_pattern), "?skip=0&take=20&searchPattern=%s", context->words[0]);
+            snprintf(search_pattern, sizeof(search_pattern), "?skip=0&take=%u&searchPattern=%s",
+                context->take_count,
+                context->words[0]);
         }
         else {
             fprintf(stderr, "Unknown command extension: %s\n", context->command);
@@ -367,7 +368,7 @@ void show_directory(command_context_t * context)
             memcpy(ptr, context->json_chunks_head + 1, context->json_chunks_head->size);
             ptr += context->json_chunks_head->size;
             check_counter -= context->json_chunks_head->size;
-//            printf("Append chunk %d bytes\n", json_chunks_head->size);
+            //            printf("Append chunk %d bytes\n", json_chunks_head->size);
             context->json_chunks_tail = context->json_chunks_head->next_chunk;
             free(context->json_chunks_head);
             context->json_chunks_head = context->json_chunks_tail;
@@ -416,7 +417,7 @@ static void download_file(command_context_t * context)
     }
 
     switch (domain) {
-    case Templates:    
+    case Templates:
         op = 't';
         break;
     case Reports:
@@ -485,7 +486,7 @@ static void upload_file(command_context_t * context)
 
     size_t encoded_size;
 
-//    Priliminary code. Limit file size to buffer size
+    //    Priliminary code. Limit file size to buffer size
 
     char input[1024 * 3];
 
@@ -549,8 +550,8 @@ static void delete_remote_object(command_context_t * context)
         return;
     }
 
-    snprintf(request, 512, "%s/api/rp/v1/%s/%s/%s", 
-        DEFAULT_SERVER, 
+    snprintf(request, 512, "%s/api/rp/v1/%s/%s/%s",
+        DEFAULT_SERVER,
         GetDomainMode(),
         object_type,
         context->words[0]);
@@ -636,21 +637,21 @@ static void change_directory(command_context_t * context)
     printf("Directory changed to: %s", GetCurrentFolder());
 }
 
-static void logout_cloud(command_context_t * context) 
-{ 
-    stop = 1; 
+static void logout_cloud(command_context_t * context)
+{
+    stop = 1;
 }
-static void select_templates(command_context_t * context) 
-{ 
-    domain = Templates; 
+static void select_templates(command_context_t * context)
+{
+    domain = Templates;
 }
-static void select_reports(command_context_t * context) 
-{ 
-    domain = Reports; 
+static void select_reports(command_context_t * context)
+{
+    domain = Reports;
 }
-static void select_exports(command_context_t * context) 
-{ 
-    domain = Exports; 
+static void select_exports(command_context_t * context)
+{
+    domain = Exports;
 }
 static void local_dir_list(command_context_t * context)
 {
@@ -661,6 +662,25 @@ static void switch_verbosity(command_context_t * context)
     verbose = verbose ? 0 : 1;
     curl_easy_setopt(context->curl, CURLOPT_VERBOSE, verbose);
     printf("curl verbose mode set to %s", verbose ? "Enabled" : "Disabled");
+}
+static void list_screen_limit(command_context_t * context)
+{
+    int value;
+    switch (context->words_count)
+    {
+    case 0:
+        printf("Will request %d direcory items", context->take_count);
+        break;
+    case 1:
+        if ((sscanf(context->words[0], "%d", &value) != 1) || value < 5 || value > 120)
+            fprintf(stderr, "Value %d out of range 5..120", value);
+        else
+            context->take_count = value;
+        break;
+    default:
+        fprintf(stderr, "Command 'limit' supports one or zero arguments\n");
+        break;
+    }
 }
 
 static void help(command_context_t * context);
@@ -678,11 +698,12 @@ command_record_t    commands[] = {
     {"templates",   select_templates, "switch to templates domain"},
     {"reports", select_reports, "switch to reports domain"},
     {"exports", select_exports, "switch to exports domain"},
+    {"profile", show_profile, "show user profile", NULL},
     {"lls",     local_dir_list, "list of local directory"},
     {"rm",      delete_remote_object, "delete file by it's UUID"},
     {"rmdir",   delete_remote_object, "delete non-empty folder by it's UUID"},
-    {"verbose", switch_verbosity, "Toggle curl verbose mode ON/OFF"},
-    {"profile", show_profile, "show user profile", NULL},
+    {"verbose", switch_verbosity, "toggle curl verbose mode ON/OFF"},
+    {"limit",   list_screen_limit, "show/set max count of items of 'ls' and 'search' commands", NULL},
     {NULL, NULL, NULL, NULL}
 };
 
@@ -690,21 +711,24 @@ static void help(command_context_t * context)
 {
     command_record_t   * ptr = commands;
     printf("List of supported commands:");
-    while (ptr->command_name != NULL) 
+    while (ptr->command_name != NULL)
     {
-        printf("\n %-10s    %s", ptr->command_name, ptr->short_help);
+        
+        printf("\n\x1B[33m\x1B[1m %-10s\x1B[0m    %s", ptr->command_name, ptr->short_help);
         ptr++;
     }
 }
 
-void user_interface(CURL * curl)
+static void user_interface(CURL * curl)
 {
     command_context_t       context;
     command_record_t    *   cmd_ptr;
     char                *   ptr;
 
-    puts("Welcome to \x1B[36mFastReport.Cloud\x1B[0m shell. Type 'help' to see list of builtin commands.");
+    puts("Welcome to \x1B[36m\x1B[1mFastReport.Cloud\x1B[0m shell. Type 'help' to see list of builtin commands.");
     stop = 0;
+    memset(&context, 0, sizeof(context));
+    context.take_count = 16;
     do {
         context.curl = curl;
         context.words_count = 0;
@@ -717,7 +741,7 @@ void user_interface(CURL * curl)
         ptr = strpbrk(context.command, " \t");
         if (ptr) {
             *ptr++ = 0;
-            while (isspace(*ptr)) 
+            while (isspace(*ptr))
                 ptr++;
             if (*ptr) {
                 context.words[context.words_count] = ptr;

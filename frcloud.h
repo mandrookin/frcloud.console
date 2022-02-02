@@ -23,14 +23,19 @@ typedef struct json_chunk_header {
 
 typedef enum { Templates, Reports, Exports} domain_t;
 
+#define ID_BUFF_SIZE  26 // 24 characters and two bytes pad
+
 typedef struct {
     CURL    *   curl;
+
     char    *   command;
     char    *   words[8];
     int         words_count;
+    int         take_count;
     uint                         received_json_size;
     json_chunk_header_t    *     json_chunks_head;
     json_chunk_header_t    *     json_chunks_tail;
+    char    active_object_uuid[ID_BUFF_SIZE];
 } command_context_t;
 
 typedef void(*cloud_command_t)(command_context_t *);
