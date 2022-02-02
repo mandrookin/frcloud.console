@@ -555,6 +555,7 @@ static void delete_remote_object(command_context_t * context)
         object_type,
         context->words[0]);
 
+    curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, stdout);
     curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, NULL);
     curl_easy_setopt(context->curl, CURLOPT_CUSTOMREQUEST, "DELETE");
     curl_easy_setopt(context->curl, CURLOPT_URL, request);

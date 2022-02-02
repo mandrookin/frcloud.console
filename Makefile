@@ -3,7 +3,7 @@ all:
 	gcc -s frcloud.c jsonparser.c config.c base64.c -lgnutls -lcurl -lreadline -o frcloud
 
 debug:
-	gcc -g frcloud.c jsonparser.c config.c base64.c -lgnutls -lcurl -lreadline -o frcloud
+	gcc -ggdb frcloud.c jsonparser.c config.c base64.c -lgnutls -lcurl -lreadline -o frcloud
 
 clean:
 	rm -f frcloud *.bak
