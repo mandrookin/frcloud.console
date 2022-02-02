@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <sys/stat.h>
 
 #include "frcloud.h"
 
@@ -41,13 +42,18 @@ int load_token(char * tokenfilename, char * auth)
         }
         key_token[i] = 0;
         key_fd = open(tokenfilename, O_WRONLY | O_CREAT, S_IRUSR | S_IWUSR);
-        if (key_fd < 0) 
+        if (key_fd < 0)
         {
             free(key_token);
             fprintf(stderr, "Unable create key token file: %s", KEY_FILE);
             return -2;
         }
         write(key_fd, key_token, strlen(key_token));
+        if (fchmod(key_fd, S_IRUSR) == -1) {
+            free(key_token);
+            fprintf(stderr, "Set S_IRUSR attrib failed ob: %s", KEY_FILE);
+            return -3;
+        }
         close(key_fd);
         strcat(auth, key_token);
         free(key_token);
