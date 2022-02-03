@@ -122,43 +122,36 @@ static int  verbose = 0;
 static int stop;
 static int file_body;
 static dnld_params_t dnld_params;
-static domain_t domain = Templates;
 static int   download_size;
 
-static char  reports_root_folder[ID_BUFF_SIZE];
-static char  reports_current_folder[ID_BUFF_SIZE];
-static char  templates_root_folder[ID_BUFF_SIZE];
-static char  templates_current_folder[ID_BUFF_SIZE];
-static char  exports_root_folder[ID_BUFF_SIZE];
-static char  exports_current_folder[ID_BUFF_SIZE];
 
-static char * GetCurrentFolder()
+static char * GetCurrentFolder(command_context_t * context)
 {
-    switch (domain)
+    switch (context->domain)
     {
-    case Templates: return templates_current_folder;
-    case Reports: return reports_current_folder;
-    case Exports: return exports_current_folder;
+    case Templates: return context->templates_current_folder;
+    case Reports: return context->reports_current_folder;
+    case Exports: return context->exports_current_folder;
     }
-    return templates_current_folder;
+    return context->templates_current_folder;
 }
 
-static char * GetRootFolder()
+static char * GetRootFolder(command_context_t * context)
 {
-    switch (domain)
+    switch (context->domain)
     {
-    case Templates: return templates_root_folder;
-    case Reports: return reports_root_folder;
-    case Exports: return exports_root_folder;
+    case Templates: return context->templates_root_folder;
+    case Reports: return context->reports_root_folder;
+    case Exports: return context->exports_root_folder;
     }
-    return templates_root_folder;
+    return context->templates_root_folder;
 }
 
-static char * GetDomainMode()
+static char * GetDomainMode(command_context_t * context)
 {
     char    *   domain_mode;
 
-    switch (domain)
+    switch (context->domain)
     {
     case Reports:   domain_mode = "Reports"; break;
     case Exports:   domain_mode = "Exports"; break;
@@ -207,7 +200,7 @@ size_t dnld_header_parse(void *hdr, size_t size, size_t nmemb, void *userdata)
     return cb;
 }
 
-char * readline_gets()
+char * readline_gets(const char * prompt)
 {
     static char *line_read = (char *)NULL;
     char  * line_ptr;
@@ -218,7 +211,7 @@ char * readline_gets()
         line_read = (char *)NULL;
     }
 
-    line_ptr = line_read = readline(/*"\n@>"*/ modes[domain]);
+    line_ptr = line_read = readline(prompt);
 
     if (line_ptr)
     {
@@ -290,7 +283,7 @@ static void prepare_report(command_context_t * context)
     char * post = alloca(PREPARE_JSON_MAX_SIZE);
     snprintf(post, PREPARE_JSON_MAX_SIZE,
         "{ \"name\": \"alman_prepared_report.fpx\", \"parentFolderId\": \"%s\"}",
-        reports_current_folder);
+        context->reports_current_folder);
 
     curl_easy_setopt(context->curl, CURLOPT_POSTFIELDS, post);
 
@@ -342,14 +335,14 @@ void show_directory(command_context_t * context)
     if (context->words_count == 0) {
         snprintf(search_pattern, sizeof(search_pattern), "?skip=0&take=%u",
             context->take_count);
-        dir_uuid = GetCurrentFolder();
+        dir_uuid = GetCurrentFolder(context);
     }
     else if (context->words_count == 1) {
         if (strcmp(context->command, "ls") == 0) {
             dir_uuid = context->words[0];
         }
         else if (strcmp(context->command, "search") == 0) {
-            dir_uuid = GetCurrentFolder();
+            dir_uuid = GetCurrentFolder(context);
             snprintf(search_pattern, sizeof(search_pattern), "?skip=0&take=%u&searchPattern=%s",
                 context->take_count,
                 context->words[0]);
@@ -366,7 +359,7 @@ void show_directory(command_context_t * context)
 
     snprintf(request, 512, "%s/api/rp/v1/%s/Folder/%s/ListFolderAndFiles%s",
         DEFAULT_SERVER,
-        GetDomainMode(),
+        GetDomainMode(context),
         dir_uuid,
         search_pattern);
 
@@ -399,10 +392,10 @@ void show_directory(command_context_t * context)
             free(context->json_chunks_head);
             context->json_chunks_head = context->json_chunks_tail;
         }
-
-//        json_stream[context->received_json_size] = 0;
-//        puts(json_stream);
-
+#if DEBUG_DIRECTORY_JSON
+        json_stream[context->received_json_size] = 0;
+        puts(json_stream);
+#endif
         draw_json_ListFolderAndFiles(json_stream, context->received_json_size);
     }
     else {
@@ -451,8 +444,8 @@ static void download_file(command_context_t * context)
     }
     else // requires switch domain
         uuid = context->words[0];
-
-    switch (domain) {
+    
+    switch (context->domain) {
     case Templates:
         op = 't';
         break;
@@ -508,11 +501,6 @@ static void upload_file(command_context_t * context)
         return;
     }
 
-    snprintf(request, 512, "%s/api/rp/v1/%s/Folder/%s/File",
-        DEFAULT_SERVER,
-        GetDomainMode(),
-        GetCurrentFolder());
-
     size_t encoded_size;
 
     int source_file = open(filename, O_RDONLY);
@@ -559,6 +547,12 @@ static void upload_file(command_context_t * context)
     struct curl_slist *headers = NULL;
     headers = curl_slist_append(headers, "Content-Type: application/json-patch+json");
     curl_easy_setopt(context->curl, CURLOPT_HTTPHEADER, headers);
+
+    snprintf(request, 512, "%s/api/rp/v1/%s/Folder/%s/File",
+        DEFAULT_SERVER,
+        GetDomainMode(context),
+        GetCurrentFolder(context));
+
     curl_easy_setopt(context->curl, CURLOPT_URL, request);
     curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, stdout);
     curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, write_json_junk);
@@ -621,7 +615,7 @@ static void delete_remote_object(command_context_t * context)
 
     snprintf(request, 512, "%s/api/rp/v1/%s/%s/%s",
         DEFAULT_SERVER,
-        GetDomainMode(),
+        GetDomainMode(context),
         object_type,
         context->words[0]);
 
@@ -654,8 +648,8 @@ static void create_folder(command_context_t * context)
     char * filename = context->words[0];
     snprintf(request, sizeof(request), "%s/api/rp/v1/%s/Folder/%s/Folder",
         DEFAULT_SERVER,
-        GetDomainMode(),
-        GetCurrentFolder());
+        GetDomainMode(context),
+        GetCurrentFolder(context));
 
     char * post = alloca(CREATE_BUFF_SIZE);
     snprintf(post, CREATE_BUFF_SIZE,
@@ -718,8 +712,8 @@ static void show_working_dicrectory_path(command_context_t * context)
 
     snprintf(request, sizeof(request), "%s/api/rp/v1/%s/Folder/%s/Breadcrumbs",
         DEFAULT_SERVER,
-        GetDomainMode(),
-        GetCurrentFolder());
+        GetDomainMode(context),
+        GetCurrentFolder(context));
 
     curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, stdout);
     curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, parse_working_directory_json);
@@ -736,7 +730,7 @@ static void change_directory(command_context_t * context)
     if (context->words_count == 0)
     {
         puts("Current dir changed to root folder. Use folder 'uuid' as an argument for cd command to change current folder");
-        strcpy(GetCurrentFolder(), GetRootFolder());
+        strcpy(GetCurrentFolder(context), GetRootFolder(context));
         return;
     }
     if (strlen(context->words[0]) != strlen("606335ef377eaa000171a5ba"))
@@ -744,8 +738,8 @@ static void change_directory(command_context_t * context)
         puts("This version supports UUID only as argument. Or no argument to change current folder to domain's root");
         return;
     }
-    strcpy(GetCurrentFolder(), context->words[0]);
-    printf("Directory changed to: %s", GetCurrentFolder());
+    strcpy(GetCurrentFolder(context), context->words[0]);
+    printf("Directory changed to: %s", GetCurrentFolder(context));
 }
 
 static void logout_cloud(command_context_t * context)
@@ -754,15 +748,15 @@ static void logout_cloud(command_context_t * context)
 }
 static void select_templates(command_context_t * context)
 {
-    domain = Templates;
+    context->domain = Templates;
 }
 static void select_reports(command_context_t * context)
 {
-    domain = Reports;
+    context->domain = Reports;
 }
 static void select_exports(command_context_t * context)
 {
-    domain = Exports;
+    context->domain = Exports;
 }
 static void local_dir_list(command_context_t * context)
 {
@@ -847,51 +841,48 @@ static void help(command_context_t * context)
     }
 }
 
-static void user_interface(CURL * curl)
+static void user_interface(command_context_t * context)
 {
-    command_context_t       context;
     command_record_t    *   cmd_ptr;
     char                *   ptr;
 
     puts("Welcome to \x1B[36m\x1B[1mFastReport.Cloud\x1B[0m shell. Type 'help' to see list of builtin commands.");
     stop = 0;
-    memset(&context, 0, sizeof(context));
-    context.take_count = 16;
+    context->take_count = 16;
     do {
-        context.curl = curl;
-        context.words_count = 0;
-        context.command = readline_gets();
-        if (context.command == NULL) {
+        context->words_count = 0;
+        context->command = readline_gets(modes[context->domain]);
+        if (context->command == NULL) {
             stop = 1;
             puts("");
             continue;
         }
-        ptr = strpbrk(context.command, " \t");
+        ptr = strpbrk(context->command, " \t");
         if (ptr) {
             *ptr++ = 0;
             while (isspace(*ptr))
                 ptr++;
             if (*ptr) {
-                context.words[context.words_count] = ptr;
-                context.words_count++;
+                context->words[context->words_count] = ptr;
+                context->words_count++;
             }
         }
 
-        if (context.command[0] == 0)
+        if (context->command[0] == 0)
             continue;
 
         for (cmd_ptr = commands; cmd_ptr->command_name; cmd_ptr++)
         {
-            if (strcmp(context.command, cmd_ptr->command_name) != 0)
+            if (strcmp(context->command, cmd_ptr->command_name) != 0)
                 continue;
-            cmd_ptr->run(&context);
+            cmd_ptr->run(context);
             break;
         }
 
         if (cmd_ptr->command_name != NULL)
             continue;
 
-        printf("Unknown command: '%s' Type 'help' and press <Enter> to see list of built-in commands", context.command);
+        printf("Unknown command: '%s' Type 'help' and press <Enter> to see list of built-in commands", context->command);
 
     } while (!stop);
 }
@@ -899,8 +890,10 @@ static void user_interface(CURL * curl)
 uint init_cb(char *in, uint size, uint nmemb, char *out)
 {
     uint r = size * nmemb;
-    char * ptr = strstr(in, "\"id\":\"");
     char * end = NULL;
+    command_context_t * context = (command_context_t*)out;
+    char * ptr = strstr(in, "\"id\":\"");
+
     if (!ptr) {
         fprintf(stderr, "Siggnature not found");
     }
@@ -917,71 +910,63 @@ uint init_cb(char *in, uint size, uint nmemb, char *out)
         exit(-50);
     }
     *end = 0;
-    switch (domain)
+    switch (context->domain)
     {
     case Templates:
-        strcpy(templates_root_folder, ptr);
-        strcpy(templates_current_folder, ptr);
+        strcpy(context->templates_root_folder, ptr);
+        strcpy(context->templates_current_folder, ptr);
         break;
     case Reports:
-        strcpy(reports_root_folder, ptr);
-        strcpy(reports_current_folder, ptr);
+        strcpy(context->reports_root_folder, ptr);
+        strcpy(context->reports_current_folder, ptr);
         break;
     case Exports:
-        strcpy(exports_root_folder, ptr);
-        strcpy(exports_current_folder, ptr);
+        strcpy(context->exports_root_folder, ptr);
+        strcpy(context->exports_current_folder, ptr);
         break;
     }
     return r;
 }
 
-void user_init(CURL * curl, char * auth)
+void user_init(command_context_t * context, char * auth)
 {
     CURLcode res;
+    int i;
+    const domain_t dlist[3] = { Templates, Reports, Exports };
+    char request[512];
 
-    memset(reports_root_folder, 0, sizeof(reports_root_folder));
-    memset(reports_current_folder, 0, sizeof(reports_current_folder));
-    memset(templates_root_folder, 0, sizeof(templates_root_folder));
-    memset(templates_current_folder, 0, sizeof(templates_current_folder));
-    memset(exports_root_folder, 0, sizeof(exports_root_folder));
-    memset(exports_current_folder, 0, sizeof(exports_current_folder));
+    curl_easy_setopt(context->curl, CURLOPT_USERPWD, auth);
+    curl_easy_setopt(context->curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2_0);
+    curl_easy_setopt(context->curl, CURLOPT_USERAGENT, "FastReport.Cloud/0.2 (Linux) libcurl");
+    curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, stdout);
+    curl_easy_setopt(context->curl, CURLOPT_VERBOSE, verbose);
+    curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, init_cb);
+    curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, context);
 
-    curl_easy_setopt(curl, CURLOPT_USERPWD, auth);
-    curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2_0);
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, "FastReport.Cloud/0.1 (Linux) libcurl");
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, stdout);
-    curl_easy_setopt(curl, CURLOPT_VERBOSE, verbose);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, init_cb);
+    for(i=0; i<3; i++)
+    { 
+        context->domain = dlist[i];
 
-    curl_easy_setopt(curl, CURLOPT_URL, DEFAULT_SERVER "/api/rp/v1/Templates/Root");
-    domain = Templates;
-    res = curl_easy_perform(curl);
-    if (res != CURLE_OK)
-        fprintf(stderr, "curl_easy_perform() failed: %s\n",
-            curl_easy_strerror(res));
+        snprintf(request, sizeof(request), "%s/api/rp/v1/%s/Root",
+            DEFAULT_SERVER,
+            GetDomainMode(context));
 
-    curl_easy_setopt(curl, CURLOPT_URL, DEFAULT_SERVER "/api/rp/v1/Reports/Root");
-    domain = Reports;
-    res = curl_easy_perform(curl);
-    if (res != CURLE_OK)
-        fprintf(stderr, "curl_easy_perform() failed: %s\n",
-            curl_easy_strerror(res));
-
-    curl_easy_setopt(curl, CURLOPT_URL, DEFAULT_SERVER "/api/rp/v1/Exports/Root");
-    domain = Exports;
-    res = curl_easy_perform(curl);
-    if (res != CURLE_OK)
-        fprintf(stderr, "curl_easy_perform() failed: %s\n",
-            curl_easy_strerror(res));
-
-    domain = Templates;
+        curl_easy_setopt(context->curl, CURLOPT_URL, request);
+        res = curl_easy_perform(context->curl);
+        if (res != CURLE_OK)
+            fprintf(stderr, "curl_easy_perform() failed: %s\n",
+                curl_easy_strerror(res));
+    }
+    context->domain = Templates;
 }
 
 int main(void)
 {
-    CURL *curl;
-    CURLcode res;
-    char    auth[256];
+    CURLcode                res;
+    command_context_t       context;
+    char                    auth[256];
+
+    memset(&context, 0, sizeof(command_context_t));
 
     strcpy(auth, "apikey:");
     if (load_token(KEY_FILE, auth) < 0) {
@@ -990,16 +975,13 @@ int main(void)
     }
 
     curl_global_init(CURL_GLOBAL_DEFAULT);
-
-    curl = curl_easy_init();
-    if (curl) {
-        user_init(curl, auth);
+    context.curl = curl_easy_init();
+    if (context.curl) {
+        user_init(&context, auth);
         memset(auth, 0, sizeof(auth));
-        user_interface(curl);
-        curl_easy_cleanup(curl);
+        user_interface(&context);
+        curl_easy_cleanup(context.curl);
     }
-
     curl_global_cleanup();
-
     return 0;
 }
