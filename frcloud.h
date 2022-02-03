@@ -21,13 +21,13 @@ typedef struct json_chunk_header {
     int                             size;
 } json_chunk_header_t;
 
-typedef enum { Templates, Reports, Exports} domain_t;
+typedef enum { Templates, Reports, Exports} namespace_t;
 
 #define ID_BUFF_SIZE  26 // 24 characters and two bytes pad
 
 typedef struct {
     CURL    *   curl;
-    domain_t    domain;;
+    namespace_t    session_namespace;;
     char    *   command;
     char    *   words[8];
     int         words_count;

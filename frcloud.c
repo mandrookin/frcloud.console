@@ -126,7 +126,7 @@ static int   download_size;
 
 static char * GetCurrentFolder(command_context_t * context)
 {
-    switch (context->domain)
+    switch (context->session_namespace)
     {
     case Templates: return context->templates_current_folder;
     case Reports: return context->reports_current_folder;
@@ -137,7 +137,7 @@ static char * GetCurrentFolder(command_context_t * context)
 
 static char * GetRootFolder(command_context_t * context)
 {
-    switch (context->domain)
+    switch (context->session_namespace)
     {
     case Templates: return context->templates_root_folder;
     case Reports: return context->reports_root_folder;
@@ -150,7 +150,7 @@ static char * GetDomainMode(command_context_t * context)
 {
     char    *   domain_mode;
 
-    switch (context->domain)
+    switch (context->session_namespace)
     {
     case Reports:   domain_mode = "Reports"; break;
     case Exports:   domain_mode = "Exports"; break;
@@ -493,10 +493,10 @@ static void download_file(command_context_t * context)
         printf("UUID: %s\n", context->active_object_uuid);
         uuid = context->active_object_uuid;
     }
-    else // requires switch domain
+    else // requires switch session_namespace
         uuid = context->words[0];
     
-    switch (context->domain) {
+    switch (context->session_namespace) {
     case Templates:
         op = 't';
         break;
@@ -804,7 +804,7 @@ static void change_directory(command_context_t * context)
     }
     if (strlen(context->words[0]) != strlen("606335ef377eaa000171a5ba"))
     {
-        puts("This version supports UUID only as argument. Or no argument to change current folder to domain's root");
+        puts("This version supports UUID only as argument. Or no argument to change current folder to session_namespace's root");
         return;
     }
     strcpy(GetCurrentFolder(context), context->words[0]);
@@ -814,18 +814,6 @@ static void change_directory(command_context_t * context)
 static void logout_cloud(command_context_t * context)
 {
     stop = 1;
-}
-static void select_templates(command_context_t * context)
-{
-    context->domain = Templates;
-}
-static void select_reports(command_context_t * context)
-{
-    context->domain = Reports;
-}
-static void select_exports(command_context_t * context)
-{
-    context->domain = Exports;
 }
 static void local_dir_list(command_context_t * context)
 {
@@ -857,6 +845,7 @@ static void list_screen_limit(command_context_t * context)
     }
 }
 
+static void select_namespace(command_context_t * context);
 static void help(command_context_t * context);
 
 #include "help_rus.h"
@@ -871,9 +860,9 @@ command_record_t    commands[] = {
     {"put",     upload_file, "upload template, report or document to cloud", NULL},
     {"pwd",     show_working_dicrectory_path, "print working directory path", NULL},
     {"exit",    logout_cloud, "exit from FastReport.Cloud console. See help", HELP_EXIT},
-    {"templates",   select_templates, "switch to templates domain", NULL},
-    {"reports", select_reports, "switch to reports domain", NULL},
-    {"exports", select_exports, "switch to exports domain", NULL},
+    {"templates", select_namespace, "switch to templates namespace, can be used as prefix", HELP_NAMESPSACES},
+    {"reports", select_namespace, "switch to reports namespace, can be used as prefix", HELP_NAMESPSACES},
+    {"exports", select_namespace, "switch to exports namespace, can be used as prefix", HELP_NAMESPSACES},
     {"info",    show_information, "show various info.", NULL},
     {"lls",     local_dir_list, "list of local directory", NULL},
     {"rm",      delete_remote_object, "delete file by it's UUID", NULL},
@@ -911,6 +900,46 @@ static void help(command_context_t * context)
     }
 }
 
+static void select_namespace(command_context_t * context)
+{
+    command_record_t    *   cmd_ptr;
+
+    if (strcmp(context->command, "templates") == 0)
+        context->session_namespace = Templates;
+    else if (strcmp(context->command, "reports") == 0)
+        context->session_namespace = Reports;
+    else if (strcmp(context->command, "exports") == 0)
+        context->session_namespace = Exports;
+    else {
+        fprintf(stderr, "Namespace %s not defined\n", context->command);
+        return;
+    }
+
+    if (context->words_count == 1) {
+        context->command = context->words[0];
+        char * ptr = strpbrk(context->words[0], " \t");
+        if (ptr != NULL) {
+            *ptr++ = 0;
+            while (isspace(*ptr))
+                ptr++;
+            if (*ptr != 0) {
+                context->words[0] = ptr;
+            }
+        }
+        else {
+            context->words[0] = 0;
+            context->words_count = 0;
+        }
+        for (cmd_ptr = commands; cmd_ptr->command_name != NULL; cmd_ptr++)
+        {
+            if (strcmp(context->command, cmd_ptr->command_name) != 0)
+                continue;
+            cmd_ptr->run(context);
+            break;
+        }
+    }
+}
+
 static void user_interface(command_context_t * context)
 {
     command_record_t    *   cmd_ptr;
@@ -921,7 +950,7 @@ static void user_interface(command_context_t * context)
     context->take_count = 16;
     do {
         context->words_count = 0;
-        context->command = readline_gets(modes[context->domain]);
+        context->command = readline_gets(modes[context->session_namespace]);
         if (context->command == NULL) {
             stop = 1;
             puts("");
@@ -976,7 +1005,7 @@ uint init_cb(char *in, uint size, uint nmemb, char *out)
         exit(-50);
     }
     *end = 0;
-    switch (context->domain)
+    switch (context->session_namespace)
     {
     case Templates:
         strcpy(context->templates_root_folder, ptr);
@@ -998,7 +1027,7 @@ void user_init(command_context_t * context, char * auth)
 {
     CURLcode res;
     int i;
-    const domain_t dlist[3] = { Templates, Reports, Exports };
+    const namespace_t dlist[3] = { Templates, Reports, Exports };
     char request[512];
 
     curl_easy_setopt(context->curl, CURLOPT_USERPWD, auth);
@@ -1011,7 +1040,7 @@ void user_init(command_context_t * context, char * auth)
 
     for(i=0; i<3; i++)
     { 
-        context->domain = dlist[i];
+        context->session_namespace = dlist[i];
 
         snprintf(request, sizeof(request), "%s/api/rp/v1/%s/Root",
             DEFAULT_SERVER,
@@ -1023,7 +1052,7 @@ void user_init(command_context_t * context, char * auth)
             fprintf(stderr, "curl_easy_perform() failed: %s\n",
                 curl_easy_strerror(res));
     }
-    context->domain = Templates;
+    context->session_namespace = Templates;
 }
 
 int main(void)
