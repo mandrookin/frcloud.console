@@ -124,7 +124,6 @@ static int file_body;
 static dnld_params_t dnld_params;
 static int   download_size;
 
-
 static char * GetCurrentFolder(command_context_t * context)
 {
     switch (context->domain)
@@ -224,7 +223,7 @@ char * readline_gets(const char * prompt)
     return (line_ptr);
 }
 
-static uint write_json_junk(char *in, uint size, uint nmemb, char *out)
+static uint write_json_chunk(char *in, uint size, uint nmemb, char *out)
 {
     uint r = size * nmemb;
     command_context_t * context = (command_context_t*)out;
@@ -256,6 +255,56 @@ static uint write_json_junk(char *in, uint size, uint nmemb, char *out)
     return r;
 }
 
+static void describe_object(command_context_t * context)
+{
+    CURLcode res;
+    char request[512];
+
+    snprintf(request, sizeof(request), "%s/api/rp/v1/%s/File/%s",
+        DEFAULT_SERVER,
+        GetDomainMode(context),
+        context->words[0]);
+
+    curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, stdout);
+    curl_easy_setopt(context->curl, CURLOPT_URL, request);
+    curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, write_json_chunk);
+
+    context->received_json_size = 0;
+    context->json_chunks_head = NULL;
+    context->json_chunks_tail = NULL;
+
+    curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, context);
+
+    res = curl_easy_perform(context->curl);
+    if (res != CURLE_OK)
+        fprintf(stderr, "curl_easy_perform() failed: %s\n",
+            curl_easy_strerror(res));
+
+    if (context->received_json_size > 0)
+    {
+        char * json_stream = alloca(context->received_json_size);
+        char * ptr = json_stream;
+        int check_counter = context->received_json_size;
+
+        while (context->json_chunks_head) {
+            memcpy(ptr, context->json_chunks_head + 1, context->json_chunks_head->size);
+            ptr += context->json_chunks_head->size;
+            check_counter -= context->json_chunks_head->size;
+            //            printf("Append chunk %d bytes\n", json_chunks_head->size);
+            context->json_chunks_tail = context->json_chunks_head->next_chunk;
+            free(context->json_chunks_head);
+            context->json_chunks_head = context->json_chunks_tail;
+        }
+#if !DEBUG_DIRECTORY_JSON
+        json_stream[context->received_json_size] = 0;
+        puts(json_stream);
+#endif
+//        json_ReportInfo(json_stream, context->received_json_size, context);
+    }
+    else {
+        fprintf(stderr, "Unable receive file '%s' properties\n", context->words[0]);
+    }
+}
 
 static void prepare_report(command_context_t * context)
 {
@@ -287,7 +336,7 @@ static void prepare_report(command_context_t * context)
 
     curl_easy_setopt(context->curl, CURLOPT_POSTFIELDS, post);
 
-    curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, write_json_junk);
+    curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, write_json_chunk);
 
     context->received_json_size = 0;
     context->json_chunks_head = NULL;
@@ -307,7 +356,7 @@ static void prepare_report(command_context_t * context)
 
     if (context->received_json_size > 0)
     {
-        char * json_stream = alloca(context->received_json_size+1);
+        char * json_stream = alloca(context->received_json_size + 1);
         char * ptr = json_stream;
         int check_counter = context->received_json_size;
 
@@ -322,6 +371,8 @@ static void prepare_report(command_context_t * context)
         }
         json_ReportInfo(json_stream, context->received_json_size, context);
     }
+    else
+        fprintf(stderr, "Empty response on preparing report\n");
 }
 
 void show_directory(command_context_t * context)
@@ -364,7 +415,7 @@ void show_directory(command_context_t * context)
         search_pattern);
 
     curl_easy_setopt(context->curl, CURLOPT_URL, request);
-    curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, write_json_junk);
+    curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, write_json_chunk);
 
     context->received_json_size = 0;
     context->json_chunks_head = NULL;
@@ -555,7 +606,7 @@ static void upload_file(command_context_t * context)
 
     curl_easy_setopt(context->curl, CURLOPT_URL, request);
     curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, stdout);
-    curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, write_json_junk);
+    curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, write_json_chunk);
 
     context->received_json_size = 0;
     context->json_chunks_head = NULL;
@@ -676,16 +727,34 @@ static void create_folder(command_context_t * context)
     curl_easy_setopt(context->curl, CURLOPT_POST, 0);
 }
 
-static void show_profile(command_context_t * context)
+static void show_information(command_context_t * context)
 {
     CURLcode res;
-    puts("----------------------- SHOW PROFILE ----------------------");
+    puts("----------------------- SERVER CONFIGURATION ----------------------");
 
     curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, stdout);
     curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, NULL);
+
+    curl_easy_setopt(context->curl, CURLOPT_URL, DEFAULT_SERVER "/api/v1/Configuration");
+
+    res = curl_easy_perform(context->curl);
+    /* Check for errors */
+    if (res != CURLE_OK)
+        fprintf(stderr, "curl_easy_perform() failed: %s\n",
+            curl_easy_strerror(res));
+
+    puts("\n----------------------- SHOW PROFILE ----------------------");
     curl_easy_setopt(context->curl, CURLOPT_URL, DEFAULT_SERVER "/api/manage/v1/UserProfile");
 
-    /* Perform the request, res will get the return code */
+    res = curl_easy_perform(context->curl);
+    /* Check for errors */
+    if (res != CURLE_OK)
+        fprintf(stderr, "curl_easy_perform() failed: %s\n",
+            curl_easy_strerror(res));
+
+    puts("\n----------------------- USER SETTINGS  ----------------------");
+    curl_easy_setopt(context->curl, CURLOPT_URL, DEFAULT_SERVER "/api/manage/v1/UserSettings");
+
     res = curl_easy_perform(context->curl);
     /* Check for errors */
     if (res != CURLE_OK)
@@ -795,7 +864,7 @@ static void help(command_context_t * context);
 command_record_t    commands[] = {
     {"help",    help, "shows list of supported commands or command description", HELP_HELP},
     {"prepare", prepare_report, "prepare report by it's UUID", NULL},
-    {"ls",      show_directory, "show directory context", NULL},
+    {"ls",      show_directory, "show directory context", HELP_LS},
     {"search",  show_directory, "show directory context by mask", NULL},
     {"cd",      change_directory, "change current directory by it's UUID", NULL},
     {"get",     download_file, "download template, report or document by it's UUID", NULL},
@@ -805,13 +874,14 @@ command_record_t    commands[] = {
     {"templates",   select_templates, "switch to templates domain", NULL},
     {"reports", select_reports, "switch to reports domain", NULL},
     {"exports", select_exports, "switch to exports domain", NULL},
-    {"profile", show_profile, "show user profile", NULL},
+    {"info",    show_information, "show various info.", NULL},
     {"lls",     local_dir_list, "list of local directory", NULL},
     {"rm",      delete_remote_object, "delete file by it's UUID", NULL},
     {"mkdir",   create_folder, "creaate folder", NULL},
     {"rmdir",   delete_remote_object, "delete non-empty folder by it's UUID", NULL },
     {"verbose", switch_verbosity, "toggle curl verbose mode ON/OFF", NULL},
     {"limit",   list_screen_limit, "show/set max count of items of 'ls' and 'search' commands", NULL},
+    {"desc",    describe_object, "show object properties by it's UUID ", NULL},
     {NULL, NULL, NULL, NULL}
 };
 
@@ -858,32 +928,28 @@ static void user_interface(command_context_t * context)
             continue;
         }
         ptr = strpbrk(context->command, " \t");
-        if (ptr) {
+        if (ptr != NULL) {
             *ptr++ = 0;
             while (isspace(*ptr))
                 ptr++;
-            if (*ptr) {
+            if (*ptr != 0) {
                 context->words[context->words_count] = ptr;
                 context->words_count++;
             }
         }
-
         if (context->command[0] == 0)
             continue;
 
-        for (cmd_ptr = commands; cmd_ptr->command_name; cmd_ptr++)
+        for (cmd_ptr = commands; cmd_ptr->command_name != NULL; cmd_ptr++)
         {
             if (strcmp(context->command, cmd_ptr->command_name) != 0)
                 continue;
             cmd_ptr->run(context);
             break;
         }
-
         if (cmd_ptr->command_name != NULL)
             continue;
-
         printf("Unknown command: '%s' Type 'help' and press <Enter> to see list of built-in commands", context->command);
-
     } while (!stop);
 }
 
@@ -892,9 +958,9 @@ uint init_cb(char *in, uint size, uint nmemb, char *out)
     uint r = size * nmemb;
     char * end = NULL;
     command_context_t * context = (command_context_t*)out;
-    char * ptr = strstr(in, "\"id\":\"");
+    char * ptr = strstr(in, "\"id\":\"");  // "id":"
 
-    if (!ptr) {
+    if (ptr == NULL) {
         fprintf(stderr, "Siggnature not found");
     }
     else {

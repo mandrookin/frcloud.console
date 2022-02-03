@@ -94,7 +94,7 @@ static void get_string(const char *js, jsmntok_t *value, char * str, int size)
     if (len + 1 > size)
     {
         len = size - 1;
-        fprintf(stderr, "Buffer is too small for json string. String cutted atd %d bytes\n.", len);
+        fprintf(stderr, "Buffer is too small for json string. String cutted at %d bytes\n.", len);
     }
     memcpy(str, js + value->start, len);
     str[len] = 0;
