@@ -124,6 +124,8 @@ static int file_body;
 static dnld_params_t dnld_params;
 static int   download_size;
 
+#pragma region Helpers
+
 static char * GetCurrentFolder(command_context_t * context)
 {
     switch (context->session_namespace)
@@ -223,6 +225,10 @@ char * readline_gets(const char * prompt)
     return (line_ptr);
 }
 
+#pragma endregion
+
+#pragma region "JSON stream loader"
+
 static uint write_json_chunk(char *in, uint size, uint nmemb, char *out)
 {
     uint r = size * nmemb;
@@ -293,6 +299,26 @@ static void json_response(command_context_t * context, char * json_stream)
 #endif
 }
 
+#pragma endregion
+
+static void next_command(command_context_t * context, char * command);
+
+static void show_context(command_context_t * context)
+{
+    printf("ID: %s\n", context->last_object.uuid);
+    printf("Type: %s\n", context->last_object.type == File ?
+        "File" : context->last_object.type == Folder ? "Folder" : "Unknown");
+    printf("Name: %s\n", context->last_object.name);
+    printf("Cloud size %d\n", context->last_object.size);
+    printf("Parent: %s\n", context->last_object.parent);
+    printf("Subscription: %s\n", context->last_object.subscription);
+    printf("Status: %s\n", context->last_object.status);
+    printf("Reason: %s\n", context->last_object.reason);
+    printf("Created: %s\n", context->last_object.edited);
+    printf("Creator: %s\n", context->last_object.creator);
+    printf("Edited: %s\n", context->last_object.edited);
+    printf("Editor: %s\n", context->last_object.editor);
+}
 
 static void use_object(command_context_t * context)
 {
@@ -319,28 +345,16 @@ static void use_object(command_context_t * context)
         switch (context->session_namespace)
         {
         case Templates:
-            status = json_ReportInfo(json_stream, context->received_json_size, context);
+        case Reports:
+        case Exports:
+            status = json_FileInfo(json_stream, context->received_json_size, context);
             if (status < 0)
                 fprintf(stderr, "json_ReportInfo = %d\n", status);
-            printf("ID: %s\n", context->last_object.uuid);
-            printf("Type: %s\n", context->last_object.type == File ?
-                "File" : context->last_object.type == Folder ? "Folder" : "Unknown");
-            printf("Name: %s\n", context->last_object.name);
-            printf("Cloud size %d\n", context->last_object.size);
-            printf("Parent: %s\n", context->last_object.parent);
-            printf("Subscription: %s\n", context->last_object.subscription);
-            printf("Status: %s\n", context->last_object.status);
-            printf("Reason: %s\n", context->last_object.reason);
-            printf("Created: %s\n", context->last_object.edited);
-            printf("Creator: %s\n", context->last_object.creator);
-            printf("Edited: %s\n", context->last_object.edited);
-            printf("Editor: %s\n", context->last_object.editor);
+            if (verbose)
+                show_context(context);
             break;
-        case Reports:
-            fprintf(stderr, "Reports json parser under construction\n");
-            break;
-        case Exports:
-            fprintf(stderr, "Exports json parser under construction\n");
+        default:
+            fprintf(stderr, "Not supported namespace %d\n", context->session_namespace);
             break;
         }
     }
@@ -352,6 +366,7 @@ static void use_object(command_context_t * context)
 static void select_object(command_context_t * context)
 {
     CURLcode res;
+    int status;
     char request[512];
 
     if (context->words_count != 1) {
@@ -371,10 +386,15 @@ static void select_object(command_context_t * context)
     {
         char * json_stream = alloca(context->received_json_size);
         json_response(context, json_stream);
-#if DEBUG_DIRECTORY_JSON
+#if !DEBUG_DIRECTORY_JSON
         json_stream[context->received_json_size] = 0;
         puts(json_stream);
 #endif
+        status = json_SelectFile(json_stream, context->received_json_size, context);
+        if (status < 0)
+            fprintf(stderr, "json_ReportInfo = %d\n", status);
+        if (verbose)
+            show_context(context);
     }
     else
         fprintf(stderr, "Unable select cloud file object: %s\n", context->words[1]);
@@ -383,16 +403,25 @@ static void select_object(command_context_t * context)
 static void prepare_report(command_context_t * context)
 {
     CURLcode    res;
+    char        * uuid, * next;
     char        request[512];
 
-    if (context->words_count != 1) {
-        puts("Not enough arguments. Use:\n> prepare 60758ec7377eaa000171a5ec\nwhere '60758ec7377eaa000171a5ec' is uuid of template");
+    switch (context->words_count)
+    {
+    case 0:
+        uuid = context->last_object.uuid;
+        break;
+    case 1:
+        uuid = context->words[0];
+        break;
+    default:
+        fprintf(stderr, "FSM error at prepare report. Give up.\n");
         return;
     }
 
     snprintf(request, 512, "%s/api/rp/v1/Templates/File/%s/Prepare",
         DEFAULT_SERVER,
-        context->words[0]);
+        uuid);
 
     struct curl_slist *headers = NULL;
     headers = curl_slist_append(headers, "Content-Type: application/json-patch+json");
@@ -431,19 +460,11 @@ static void prepare_report(command_context_t * context)
     if (context->received_json_size > 0)
     {
         char * json_stream = alloca(context->received_json_size + 1);
-        char * ptr = json_stream;
-        int check_counter = context->received_json_size;
-
-        while (context->json_chunks_head) {
-            memcpy(ptr, context->json_chunks_head + 1, context->json_chunks_head->size);
-            ptr += context->json_chunks_head->size;
-            check_counter -= context->json_chunks_head->size;
-            //            printf("Append chunk %d bytes\n", json_chunks_head->size);
-            context->json_chunks_tail = context->json_chunks_head->next_chunk;
-            free(context->json_chunks_head);
-            context->json_chunks_head = context->json_chunks_tail;
-        }
-        json_ReportInfo(json_stream, context->received_json_size, context);
+        json_response(context, json_stream);
+        // printf("--- %s\n", json_stream);
+        json_FileInfo(json_stream, context->received_json_size, context);
+        if (verbose)
+            show_context(context);
     }
     else
         fprintf(stderr, "Empty response on preparing report\n");
@@ -678,20 +699,10 @@ static void upload_file(command_context_t * context)
     if (context->received_json_size > 0)
     {
         char * json_stream = alloca(context->received_json_size);
-        char * ptr = json_stream;
-        int check_counter = context->received_json_size;
-
-        while (context->json_chunks_head) {
-            memcpy(ptr, context->json_chunks_head + 1, context->json_chunks_head->size);
-            ptr += context->json_chunks_head->size;
-            check_counter -= context->json_chunks_head->size;
-            //            printf("Append chunk %d bytes\n", json_chunks_head->size);
-            context->json_chunks_tail = context->json_chunks_head->next_chunk;
-            free(context->json_chunks_head);
-            context->json_chunks_head = context->json_chunks_tail;
-        }
-
-        json_ReportInfo(json_stream, context->received_json_size, context);
+        json_response(context, json_stream);
+        json_FileInfo(json_stream, context->received_json_size, context);
+        if (verbose)
+            show_context(context);
     }
 }
 
@@ -811,6 +822,9 @@ static void show_information(command_context_t * context)
     if (res != CURLE_OK)
         fprintf(stderr, "curl_easy_perform() failed: %s\n",
             curl_easy_strerror(res));
+
+    puts("\n----------------------- ACTIVE CONTEXT  ----------------------");
+    show_context(context);
 }
 
 static uint parse_working_directory_json(char *in, uint size, uint nmemb, char *out)
@@ -903,9 +917,9 @@ static void help(command_context_t * context);
 
 command_record_t    commands[] = {
     {"help",    help, "shows list of supported commands or command description", HELP_HELP},
-    {"templates", select_namespace, "switch to templates namespace, can be used as prefix", HELP_NAMESPSACES},
-    {"reports", select_namespace, "switch to reports namespace, can be used as prefix", HELP_NAMESPSACES},
-    {"exports", select_namespace, "switch to exports namespace, can be used as prefix", HELP_NAMESPSACES},
+    {"template", select_namespace, "switch to templates namespace, can be used as prefix", HELP_NAMESPSACES},
+    {"report", select_namespace, "switch to reports namespace, can be used as prefix", HELP_NAMESPSACES},
+    {"export", select_namespace, "switch to exports namespace, can be used as prefix", HELP_NAMESPSACES},
     {"ls",      show_directory, "show directory context", HELP_LS},
     {"use",     use_object, "set active template, report, or document by it's UUID ", NULL},
     {"file",    select_object, "set active template, report, or document by it's human readble name ", NULL},
@@ -921,7 +935,7 @@ command_record_t    commands[] = {
     {"rmdir",   delete_remote_object, "delete non-empty folder by it's UUID", NULL },
     {"verbose", switch_verbosity, "toggle curl verbose mode ON/OFF", NULL},
     {"limit",   list_screen_limit, "show/set max count of items of 'ls' and 'search' commands", NULL},
-    {"info",    show_information, "show various info.", NULL},
+    {"info",    show_information, "show various info.", HELP_INFO},
     {"exit",    logout_cloud, "exit from FastReport.Cloud console. See help", HELP_EXIT},
     {NULL, NULL, NULL, NULL}
 };
@@ -952,15 +966,42 @@ static void help(command_context_t * context)
     }
 }
 
+static void next_command(command_context_t * context, char * command)
+{
+    command_record_t    *   cmd_ptr;
+    context->command = command;
+    char * ptr = strpbrk(command, " \t");
+    if (ptr != NULL) {
+        *ptr++ = 0;
+        while (isspace(*ptr))
+            ptr++;
+        if (*ptr != 0) {
+            context->words[0] = ptr;
+        }
+    }
+    else {
+        context->words[0] = 0;
+        context->words_count = 0;
+    }
+    for (cmd_ptr = commands; cmd_ptr->command_name != NULL; cmd_ptr++)
+    {
+        if (strcmp(context->command, cmd_ptr->command_name) != 0)
+            continue;
+        cmd_ptr->run(context);
+        break;
+    }
+}
+
+
 static void select_namespace(command_context_t * context)
 {
     command_record_t    *   cmd_ptr;
 
-    if (strcmp(context->command, "templates") == 0)
+    if (strcmp(context->command, "template") == 0)
         context->session_namespace = Templates;
-    else if (strcmp(context->command, "reports") == 0)
+    else if (strcmp(context->command, "report") == 0)
         context->session_namespace = Reports;
-    else if (strcmp(context->command, "exports") == 0)
+    else if (strcmp(context->command, "export") == 0)
         context->session_namespace = Exports;
     else {
         fprintf(stderr, "Namespace %s not defined\n", context->command);
@@ -968,27 +1009,7 @@ static void select_namespace(command_context_t * context)
     }
 
     if (context->words_count == 1) {
-        context->command = context->words[0];
-        char * ptr = strpbrk(context->words[0], " \t");
-        if (ptr != NULL) {
-            *ptr++ = 0;
-            while (isspace(*ptr))
-                ptr++;
-            if (*ptr != 0) {
-                context->words[0] = ptr;
-            }
-        }
-        else {
-            context->words[0] = 0;
-            context->words_count = 0;
-        }
-        for (cmd_ptr = commands; cmd_ptr->command_name != NULL; cmd_ptr++)
-        {
-            if (strcmp(context->command, cmd_ptr->command_name) != 0)
-                continue;
-            cmd_ptr->run(context);
-            break;
-        }
+        next_command(context, context->words[0]);
     }
 }
 
@@ -1084,7 +1105,7 @@ void user_init(command_context_t * context, char * auth)
 
     curl_easy_setopt(context->curl, CURLOPT_USERPWD, auth);
     curl_easy_setopt(context->curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2_0);
-    curl_easy_setopt(context->curl, CURLOPT_USERAGENT, "FastReport.Cloud/0.2 (Linux) libcurl");
+    curl_easy_setopt(context->curl, CURLOPT_USERAGENT, "FastReport.Cloud/0.3 (Linux) libcurl");
     curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, stdout);
     curl_easy_setopt(context->curl, CURLOPT_VERBOSE, verbose);
     curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, init_cb);
