@@ -26,7 +26,13 @@ type ```strip frcloud``` for reducing binary size
 
 type ```./frcoud``` for run console
 
-If token file not found then programm will ask for token. Provide correct token and it will be stored to a configuration file. 
+If the token file not found then program will ask for token. Provide correct token and it will be stored to a configuration file. 
+Utility can work in interactive and batch modes. By default it operates in interactive mode. But it also can receive commands from a pipe. Here is some example:
+
+```bash
+echo -e "ls\n profile\n pwd" | ./fr_cloud
+```
+This snippet will execute three commands - list current directory, show active profile, and show current folder's path.
 
 ### List of supported commands ###
 
