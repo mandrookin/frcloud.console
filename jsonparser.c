@@ -68,7 +68,7 @@ static int dump(const char *js, jsmntok_t *t, size_t count, int indent, char * h
                 j += dump(js, t + 1 + j, count - j, indent + 1, value);
             }
             puts("");
-//            printf("%s: %s\n", name, value);
+            //            printf("%s: %s\n", name, value);
         }
         return j + 1;
     }
@@ -117,13 +117,12 @@ static int json_text_compare(const char *js, jsmntok_t *t, char * str)
     return len == 0;
 }
 
-typedef enum { Unknown, File, Folder } dirtype_t;
 typedef struct frc_direntry {
     struct frc_direntry * next;
     int size;
     int attrib;
     char name[128];
-    dirtype_t type;
+    object_type_t type;
     char id[32];
     char create[32];
     char edited[32];
@@ -299,7 +298,7 @@ int draw_json_Breadcrumbs(char *js, size_t jslen)
     jsmntok_t * t = tok;
 
     if (tok != NULL) {
-//        dump(js, tok, count, 0, alloca(1024));
+        //        dump(js, tok, count, 0, alloca(1024));
 
         if (count == 0) {
             puts("Breadcrumbs json zero token count");
@@ -347,31 +346,98 @@ int draw_json_Breadcrumbs(char *js, size_t jslen)
 
 int json_ReportInfo(char *js, size_t jslen, command_context_t * context)
 {
-#if FALSE // TODO: parse report info
     int i, k;
     int eof_expected = 0;
     int count;
+    char    tmp_buff[1024];
+
+    if (context->last_object.name != NULL) {
+        printf("Release name: %s\n", context->last_object.name);
+        free(0);
+    }
+    memset( &context->last_object, 0, sizeof(context->last_object));
 
     jsmntok_t * tok = prepare_json(js, jslen, &count);
-    jsmntok_t * t = tok;
 
-    dump(js, tok, count, 0, alloca(1024));
-    for (i = 0; i < count; i++)
-        printf(" JSON[%d].type = %d size = %d\n", i, tok[i].type, tok[i].size);
-#else
-    // Just take ID of operation
-    do {
-        if (!jslen) break;
-        js[jslen--] = 0;
-        char * ptr = strstr(js, "\"id\":\"");
-        if (!ptr) break;
-        ptr += 6;
-        char * end = strchr(ptr, '"');
-        if (!end || (end-ptr != 24)) break;
-        *end = 0;
-        printf("ID = %s\n", ptr);
-        strcpy(context->active_object_uuid, ptr);
-    } while (0);
+    //dump(js, tok, count, 0, /*alloca(1024)*/ 0);
+
+    if (tok->type != JSMN_OBJECT)
+        return -13;
+    if (!json_text_compare(js, tok + 1, "reportInfo"))
+        return -14;
+    jsmntok_t * t = tok + ((tok + 2)->size << 1) + 3;
+
+    get_string(js, t, tmp_buff, sizeof(tmp_buff));
+    //printf(" --- %s\n", js);
+
+    if (!json_text_compare(js, t++, "name"))
+        return -15;
+    get_string(js, t++, tmp_buff, sizeof(tmp_buff));
+    int len = strlen(tmp_buff);
+    if (len == 0)
+        fprintf(stderr, "Got emtpy name of report object\n");
+    else {
+        context->last_object.name = malloc(len + 1);
+        if (context->last_object.name == NULL) {
+            fprintf(stderr, "Unable allocate memory for name of report object. Lost name: %s\n", tmp_buff);
+        }
+        else {
+            strcpy(context->last_object.name, tmp_buff);
+        }
+//        printf("Name: %s\n", context->last_object.name);
+    }
+
+    if (!json_text_compare(js, t++, "parentId"))
+        return -16;
+    get_string(js, t++, context->last_object.parent, sizeof(context->last_object.parent));
+
+    if (!json_text_compare(js, t++, "type"))
+        return -17;
+    get_string(js, t++, tmp_buff, sizeof(tmp_buff));
+    if (strcmp("File", tmp_buff) == 0)
+        context->last_object.type = File;
+    else if(strcmp("Folder", tmp_buff) == 0)
+        context->last_object.type = Folder;
+    else
+        fprintf(stderr, "Object type not parsed: %s\n", tmp_buff);
+
+    if (!json_text_compare(js, t++, "size"))
+        return -18;
+    get_string(js, t++, tmp_buff, sizeof(tmp_buff));
+    if(1 != sscanf(tmp_buff, "%u", &context->last_object.size)) 
+        fprintf(stderr, "Size : %s   sz = %d\n", tmp_buff, context->last_object.size);
+
+    if (!json_text_compare(js, t++, "subscriptionId"))
+        return -19;
+    get_string(js, t++, context->last_object.subscription, sizeof(context->last_object.subscription));
+
+    if (!json_text_compare(js, t++, "status"))
+        return -20;
+    get_string(js, t++, context->last_object.status, sizeof(context->last_object.status));
+
+    if (!json_text_compare(js, t++, "statusReason"))
+        return -21;
+    get_string(js, t++, context->last_object.reason, sizeof(context->last_object.reason));
+
+    if (!json_text_compare(js, t++, "id"))
+        return -22;
+    get_string(js, t++, context->last_object.uuid, sizeof(context->last_object.uuid));
+
+    if (!json_text_compare(js, t++, "createdTime"))
+        return -23;
+    get_string(js, t++, context->last_object.edited, sizeof(context->last_object.edited));
+
+    if (!json_text_compare(js, t++, "creatorUserId"))
+        return -24;
+    get_string(js, t++, context->last_object.creator, sizeof(context->last_object.creator));
+
+    if (!json_text_compare(js, t++, "editedTime"))
+        return -25;
+    get_string(js, t++, context->last_object.edited, sizeof(context->last_object.edited));
+
+    if (!json_text_compare(js, t++, "editorUserId"))
+        return -26;
+    get_string(js, t++, context->last_object.editor, sizeof(context->last_object.editor));
+
     return 0;
-#endif
 }

@@ -255,9 +255,49 @@ static uint write_json_chunk(char *in, uint size, uint nmemb, char *out)
     return r;
 }
 
-static void describe_object(command_context_t * context)
+static void json_request(command_context_t * context, char const * const request)
 {
     CURLcode res;
+
+    context->received_json_size = 0;
+    context->json_chunks_head = NULL;
+    context->json_chunks_tail = NULL;
+
+    curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, context);
+    curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, write_json_chunk);
+    curl_easy_setopt(context->curl, CURLOPT_URL, request);
+
+    res = curl_easy_perform(context->curl);
+    if (res != CURLE_OK)
+        fprintf(stderr, "curl_easy_perform() failed: %s\n",
+            curl_easy_strerror(res));
+}
+
+static void json_response(command_context_t * context, char * json_stream)
+{
+    char * ptr = json_stream;
+    int check_counter = context->received_json_size;
+
+    while (context->json_chunks_head) {
+        memcpy(ptr, context->json_chunks_head + 1, context->json_chunks_head->size);
+        ptr += context->json_chunks_head->size;
+        check_counter -= context->json_chunks_head->size;
+        //            printf("Append chunk %d bytes\n", json_chunks_head->size);
+        context->json_chunks_tail = context->json_chunks_head->next_chunk;
+        free(context->json_chunks_head);
+        context->json_chunks_head = context->json_chunks_tail;
+    }
+#if DEBUG_DIRECTORY_JSON
+    json_stream[context->received_json_size] = 0;
+    puts(json_stream);
+#endif
+}
+
+
+static void use_object(command_context_t * context)
+{
+    CURLcode res;
+    int status;
     char request[512];
 
     snprintf(request, sizeof(request), "%s/api/rp/v1/%s/File/%s",
@@ -265,45 +305,79 @@ static void describe_object(command_context_t * context)
         GetDomainMode(context),
         context->words[0]);
 
-    curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, stdout);
-    curl_easy_setopt(context->curl, CURLOPT_URL, request);
-    curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, write_json_chunk);
-
-    context->received_json_size = 0;
-    context->json_chunks_head = NULL;
-    context->json_chunks_tail = NULL;
-
-    curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, context);
-
-    res = curl_easy_perform(context->curl);
-    if (res != CURLE_OK)
-        fprintf(stderr, "curl_easy_perform() failed: %s\n",
-            curl_easy_strerror(res));
+    json_request(context, request);
 
     if (context->received_json_size > 0)
     {
         char * json_stream = alloca(context->received_json_size);
-        char * ptr = json_stream;
-        int check_counter = context->received_json_size;
+        json_response(context, json_stream);
 
-        while (context->json_chunks_head) {
-            memcpy(ptr, context->json_chunks_head + 1, context->json_chunks_head->size);
-            ptr += context->json_chunks_head->size;
-            check_counter -= context->json_chunks_head->size;
-            //            printf("Append chunk %d bytes\n", json_chunks_head->size);
-            context->json_chunks_tail = context->json_chunks_head->next_chunk;
-            free(context->json_chunks_head);
-            context->json_chunks_head = context->json_chunks_tail;
-        }
-#if !DEBUG_DIRECTORY_JSON
+#if DEBUG_DIRECTORY_JSON
         json_stream[context->received_json_size] = 0;
         puts(json_stream);
 #endif
-//        json_ReportInfo(json_stream, context->received_json_size, context);
+        switch (context->session_namespace)
+        {
+        case Templates:
+            status = json_ReportInfo(json_stream, context->received_json_size, context);
+            if (status < 0)
+                fprintf(stderr, "json_ReportInfo = %d\n", status);
+            printf("ID: %s\n", context->last_object.uuid);
+            printf("Type: %s\n", context->last_object.type == File ?
+                "File" : context->last_object.type == Folder ? "Folder" : "Unknown");
+            printf("Name: %s\n", context->last_object.name);
+            printf("Cloud size %d\n", context->last_object.size);
+            printf("Parent: %s\n", context->last_object.parent);
+            printf("Subscription: %s\n", context->last_object.subscription);
+            printf("Status: %s\n", context->last_object.status);
+            printf("Reason: %s\n", context->last_object.reason);
+            printf("Created: %s\n", context->last_object.edited);
+            printf("Creator: %s\n", context->last_object.creator);
+            printf("Edited: %s\n", context->last_object.edited);
+            printf("Editor: %s\n", context->last_object.editor);
+            break;
+        case Reports:
+            fprintf(stderr, "Reports json parser under construction\n");
+            break;
+        case Exports:
+            fprintf(stderr, "Exports json parser under construction\n");
+            break;
+        }
     }
     else {
         fprintf(stderr, "Unable receive file '%s' properties\n", context->words[0]);
     }
+}
+
+static void select_object(command_context_t * context)
+{
+    CURLcode res;
+    char request[512];
+
+    if (context->words_count != 1) {
+        fprintf(stderr, "'file' command must have a name parameter\n");
+        return;
+    }
+
+    snprintf(request, 512, "%s/api/rp/v1/%s/Folder/%s/ListFiles?skip=0&take=1&orderBy=editedTime&desc=True&searchPattern=%s",
+        DEFAULT_SERVER,
+        GetDomainMode(context),
+        GetCurrentFolder(context),
+        context->words[0]);
+
+    json_request(context, request);
+
+    if (context->received_json_size > 0)
+    {
+        char * json_stream = alloca(context->received_json_size);
+        json_response(context, json_stream);
+#if DEBUG_DIRECTORY_JSON
+        json_stream[context->received_json_size] = 0;
+        puts(json_stream);
+#endif
+    }
+    else
+        fprintf(stderr, "Unable select cloud file object: %s\n", context->words[1]);
 }
 
 static void prepare_report(command_context_t * context)
@@ -414,35 +488,12 @@ void show_directory(command_context_t * context)
         dir_uuid,
         search_pattern);
 
-    curl_easy_setopt(context->curl, CURLOPT_URL, request);
-    curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, write_json_chunk);
-
-    context->received_json_size = 0;
-    context->json_chunks_head = NULL;
-    context->json_chunks_tail = NULL;
-
-    curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, context);
-
-    res = curl_easy_perform(context->curl);
-    if (res != CURLE_OK)
-        fprintf(stderr, "curl_easy_perform() failed: %s\n",
-            curl_easy_strerror(res));
+    json_request(context, request);
 
     if (context->received_json_size > 0)
     {
         char * json_stream = alloca(context->received_json_size);
-        char * ptr = json_stream;
-        int check_counter = context->received_json_size;
-
-        while (context->json_chunks_head) {
-            memcpy(ptr, context->json_chunks_head + 1, context->json_chunks_head->size);
-            ptr += context->json_chunks_head->size;
-            check_counter -= context->json_chunks_head->size;
-            //            printf("Append chunk %d bytes\n", json_chunks_head->size);
-            context->json_chunks_tail = context->json_chunks_head->next_chunk;
-            free(context->json_chunks_head);
-            context->json_chunks_head = context->json_chunks_tail;
-        }
+        json_response(context, json_stream);
 #if DEBUG_DIRECTORY_JSON
         json_stream[context->received_json_size] = 0;
         puts(json_stream);
@@ -485,13 +536,13 @@ static void download_file(command_context_t * context)
     char op;
 
     if (context->words_count == 0) {
-        if (context->active_object_uuid[0] == 0) {
+        if (context->last_object.uuid[0] == 0) {
             puts("Active object is not available yet");
             return;
         }
         // Take UUID from resuilt of previous command
-        printf("UUID: %s\n", context->active_object_uuid);
-        uuid = context->active_object_uuid;
+        printf("UUID: %s\n", context->last_object.uuid);
+        uuid = context->last_object.uuid;
     }
     else // requires switch session_namespace
         uuid = context->words[0];
@@ -852,25 +903,26 @@ static void help(command_context_t * context);
 
 command_record_t    commands[] = {
     {"help",    help, "shows list of supported commands or command description", HELP_HELP},
-    {"prepare", prepare_report, "prepare report by it's UUID", NULL},
+    {"templates", select_namespace, "switch to templates namespace, can be used as prefix", HELP_NAMESPSACES},
+    {"reports", select_namespace, "switch to reports namespace, can be used as prefix", HELP_NAMESPSACES},
+    {"exports", select_namespace, "switch to exports namespace, can be used as prefix", HELP_NAMESPSACES},
     {"ls",      show_directory, "show directory context", HELP_LS},
+    {"use",     use_object, "set active template, report, or document by it's UUID ", NULL},
+    {"file",    select_object, "set active template, report, or document by it's human readble name ", NULL},
+    {"prepare", prepare_report, "prepare report by it's UUID", NULL},
     {"search",  show_directory, "show directory context by mask", NULL},
     {"cd",      change_directory, "change current directory by it's UUID", NULL},
     {"get",     download_file, "download template, report or document by it's UUID", NULL},
     {"put",     upload_file, "upload template, report or document to cloud", NULL},
     {"pwd",     show_working_dicrectory_path, "print working directory path", NULL},
-    {"exit",    logout_cloud, "exit from FastReport.Cloud console. See help", HELP_EXIT},
-    {"templates", select_namespace, "switch to templates namespace, can be used as prefix", HELP_NAMESPSACES},
-    {"reports", select_namespace, "switch to reports namespace, can be used as prefix", HELP_NAMESPSACES},
-    {"exports", select_namespace, "switch to exports namespace, can be used as prefix", HELP_NAMESPSACES},
-    {"info",    show_information, "show various info.", NULL},
     {"lls",     local_dir_list, "list of local directory", NULL},
     {"rm",      delete_remote_object, "delete file by it's UUID", NULL},
     {"mkdir",   create_folder, "creaate folder", NULL},
     {"rmdir",   delete_remote_object, "delete non-empty folder by it's UUID", NULL },
     {"verbose", switch_verbosity, "toggle curl verbose mode ON/OFF", NULL},
     {"limit",   list_screen_limit, "show/set max count of items of 'ls' and 'search' commands", NULL},
-    {"desc",    describe_object, "show object properties by it's UUID ", NULL},
+    {"info",    show_information, "show various info.", NULL},
+    {"exit",    logout_cloud, "exit from FastReport.Cloud console. See help", HELP_EXIT},
     {NULL, NULL, NULL, NULL}
 };
 
