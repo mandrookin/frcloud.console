@@ -302,6 +302,7 @@ static void json_response(command_context_t * context, char * json_stream)
 #pragma endregion
 
 static void next_command(command_context_t * context, char * command);
+static char * parse_filename(command_context_t * context, char * input);
 
 static void show_context(command_context_t * context)
 {
@@ -386,7 +387,7 @@ static void select_object(command_context_t * context)
     {
         char * json_stream = alloca(context->received_json_size);
         json_response(context, json_stream);
-#if !DEBUG_DIRECTORY_JSON
+#if DEBUG_DIRECTORY_JSON
         json_stream[context->received_json_size] = 0;
         puts(json_stream);
 #endif
@@ -432,9 +433,27 @@ static void prepare_report(command_context_t * context)
 
 #define PREPARE_JSON_MAX_SIZE   1024
 
+    char name_holder[250];
+    if (context->last_object.name)
+    {
+        strcpy(name_holder, context->last_object.name);
+        int len = strlen(name_holder);
+        if (len > 4) {
+            if (strcmp(&name_holder[len - 4], ".frx") == 0)
+                name_holder[len - 4] = 0;
+        }
+        strcat(name_holder, ".fpx");
+    }
+    else
+    {
+        strcpy(name_holder, "unnamed.fpx");
+    }
+//    printf("::: %s\n", name_holder);
+
     char * post = alloca(PREPARE_JSON_MAX_SIZE);
     snprintf(post, PREPARE_JSON_MAX_SIZE,
-        "{ \"name\": \"alman_prepared_report.fpx\", \"parentFolderId\": \"%s\"}",
+        "{ \"name\": \"%s\", \"parentFolderId\": \"%s\"}",
+        name_holder,
         context->reports_current_folder);
 
     curl_easy_setopt(context->curl, CURLOPT_POSTFIELDS, post);
@@ -614,11 +633,12 @@ static void upload_file(command_context_t * context)
     char    *   filename;
     char        request[512];
 
-    if (context->words_count != 1) {
+    if (context->words_count != 1 || context->words[0] == NULL) {
         printf("Use> put filename\n  where 'filename' is path to local file\n");
         return;
     }
-    filename = context->words[0];
+    filename = parse_filename(context, context->words[0]);
+
     if (access(filename, R_OK) == -1) {
         fprintf(stderr, "File not exist or access denied for: %s", filename);
         return;
@@ -676,20 +696,7 @@ static void upload_file(command_context_t * context)
         GetDomainMode(context),
         GetCurrentFolder(context));
 
-    curl_easy_setopt(context->curl, CURLOPT_URL, request);
-    curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, stdout);
-    curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, write_json_chunk);
-
-    context->received_json_size = 0;
-    context->json_chunks_head = NULL;
-    context->json_chunks_tail = NULL;
-
-    curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, context);
-
-    res = curl_easy_perform(context->curl);
-    if (res != CURLE_OK)
-        fprintf(stderr, "curl_easy_perform() failed: %s\n",
-            curl_easy_strerror(res));
+    json_request(context, request);
 
     curl_slist_free_all(headers);
     curl_easy_setopt(context->curl, CURLOPT_HTTPHEADER, NULL);
@@ -704,18 +711,25 @@ static void upload_file(command_context_t * context)
         if (verbose)
             show_context(context);
     }
+
+    if (context->words_count == 1) {
+        next_command(context, context->words[0]);
+    }
 }
 
 static void delete_remote_object(command_context_t * context)
 {
     CURLcode res;
     char * object_type;
+    char * filename;
     char request[512];
 
     if (context->words_count != 1) {
         puts("Use rm/rmdir 'uuid' to delete file/directory. Where 'uuid' is unique identifier of file");
         return;
     }
+
+    filename = parse_filename(context, context->words[0]);
 
     if (strcmp(context->command, "rm") == 0)
         object_type = "File";
@@ -730,7 +744,7 @@ static void delete_remote_object(command_context_t * context)
         DEFAULT_SERVER,
         GetDomainMode(context),
         object_type,
-        context->words[0]);
+        filename);
 
     curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, stdout);
     curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, NULL);
@@ -745,6 +759,10 @@ static void delete_remote_object(command_context_t * context)
     if (res != CURLE_OK)
         fprintf(stderr, "curl_easy_perform() failed: %s\n",
             curl_easy_strerror(res));
+
+    if (context->words_count == 1) {
+        next_command(context, context->words[0]);
+    }
 }
 
 static void create_folder(command_context_t * context)
@@ -896,11 +914,11 @@ static void list_screen_limit(command_context_t * context)
     switch (context->words_count)
     {
     case 0:
-        printf("Will request %d direcory items", context->take_count);
+        printf("Limit set to %d direcory items", context->take_count);
         break;
     case 1:
         if ((sscanf(context->words[0], "%d", &value) != 1) || value < 5 || value > 120)
-            fprintf(stderr, "Value %d out of range 5..120", value);
+            fprintf(stderr, "Limit value %d out of range 5..120", value);
         else
             context->take_count = value;
         break;
@@ -929,7 +947,7 @@ command_record_t    commands[] = {
     {"get",     download_file, "download template, report or document by it's UUID", NULL},
     {"put",     upload_file, "upload template, report or document to cloud", NULL},
     {"pwd",     show_working_dicrectory_path, "print working directory path", NULL},
-    {"lls",     local_dir_list, "list of local directory", NULL},
+    {"lls",     local_dir_list, "list of files local directory", NULL},
     {"rm",      delete_remote_object, "delete file by it's UUID", NULL},
     {"mkdir",   create_folder, "creaate folder", NULL},
     {"rmdir",   delete_remote_object, "delete non-empty folder by it's UUID", NULL },
@@ -992,6 +1010,61 @@ static void next_command(command_context_t * context, char * command)
     }
 }
 
+static char * parse_filename(command_context_t * context, char * input)
+{
+    char *result = input;
+    int prefix = 0;
+    if (*input == '"') {
+        int length = 0;
+        input++;
+        result = input;
+        while (*input) {
+            switch (*input) {
+            case '"':
+                if (prefix == 0) {
+                    *input++ = 0;
+                    if (*input == 0) {
+                        context->words_count = 0;
+                        context->words[0] = NULL;
+                        break;
+                    }
+                    while (isspace(*input))
+                        input++;
+                    if (*input == 0)
+                        break;
+                    context->words_count = 1;
+                    context->words[0] = input;
+                    return result;
+                }
+                prefix = 0;
+                break;
+            case '\\':
+                prefix = 1;
+            default:
+                prefix = 0;
+            }
+            input++;
+            continue;
+        }
+    }
+    else {
+        while (*input && !isspace(*input)) {
+            input++;
+        }
+        if (*input == 0) {
+            context->words_count = 0;
+            context->words[0] = NULL;
+        }
+        else {
+            context->words_count = 1;
+            while (*input && isspace(*input)) {
+                *input++ = 0;
+            }
+            context->words[0] = input;
+        }
+    }
+    return result;
+}
 
 static void select_namespace(command_context_t * context)
 {
