@@ -8,6 +8,7 @@
 #define KEY_FILE            "FastReport.Cloud.key"
 // FastReport cloud server address
 #define DEFAULT_SERVER      "https://fastreport.cloud"
+#define ID_SIZE 24
 
 typedef unsigned long uint64_t;
 
