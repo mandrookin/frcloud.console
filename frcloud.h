@@ -24,6 +24,7 @@ typedef struct json_chunk_header {
 
 typedef enum { Templates, Reports, Exports} namespace_t;
 typedef enum { Unknown, File, Folder } object_type_t;
+typedef enum { Fpx, Pdf, Html, Docx} export_type_t;
 
 #define ID_BUFF_SIZE  26 // 24 characters and two bytes pad
 

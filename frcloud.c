@@ -218,8 +218,11 @@ char * readline_gets(const char * prompt)
     {
         while (isspace(*line_ptr))
             line_ptr++;
-        if (*line_ptr)
-            add_history(line_ptr);
+        if (*line_ptr) {
+            int res = history_search_pos(line_ptr, 1, 0);
+            if(res < 0)
+                add_history(line_ptr);
+        }
     }
 
     return (line_ptr);
@@ -393,8 +396,8 @@ static void select_object(command_context_t * context)
     filename = parse_filename(context, context->words[0], 0);
 
     int i, pos = 0;
-    for (i=0; filename[i]; ++i) {
-        pos += snprintf(encoded_filename + pos, 255 - pos, "%%%02X", (unsigned char) filename[i]);
+    for (i = 0; filename[i]; ++i) {
+        pos += snprintf(encoded_filename + pos, 255 - pos, "%%%02X", (unsigned char)filename[i]);
     }
 
     snprintf(request, 512, "%s/api/rp/v1/%s/Folder/%s/ListFiles?skip=0&take=1&orderBy=editedTime&desc=True&searchPattern=%s",
@@ -434,20 +437,56 @@ static void select_object(command_context_t * context)
 static void prepare_report(command_context_t * context)
 {
     CURLcode    res;
-    char        * uuid, *next;
+    export_type_t   type = Fpx;
+    char        * uuid, *next, *modifier = NULL;
     char        request[512];
 
-    switch (context->words_count)
-    {
-    case 0:
+    if (context->words_count == 0)
         uuid = context->last_object.uuid;
-        break;
-    case 1:
-        uuid = context->words[0];
-        break;
-    default:
-        fprintf(stderr, "FSM error at prepare report. Give up.\n");
-        return;
+    else {
+
+        uuid = parse_uuid(context, context->words[0]);
+        if (uuid == NULL)
+            uuid = context->last_object.uuid;
+        else if (context->words_count == 1) {
+            modifier = next = context->words[0];
+            while (*next && !isspace(*next))
+                next++;
+            while (*next && isspace(*next))
+                *next++ = 0;
+            if (*next) {
+                context->words_count = 1;
+                if (strcmp(modifier, "as") == 0) {
+                    modifier = next;
+                    while (*next && !isspace(*next))
+                        next++;
+                    if (*next && isspace(*next))
+                        *next++ = '\0';
+                    context->words[0] = next;
+                    if (strcmp(modifier, "pdf") == 0) {
+                        type = Pdf;
+                    }
+                    else if (strcmp(modifier, "html") == 0) {
+                        type = Html;
+                    }
+                    else if (strcmp(modifier, "docx") == 0) {
+                        type = Docx;
+                    }
+                    else {
+                        fprintf(stderr, "Export to %s not supported\n", modifier);
+                        return;
+                    }
+                } else {
+                    context->words[0] = modifier;
+                }
+                printf(" *** NEXT: %s\n", next);
+            }
+            else {
+                context->words_count = 0;
+                context->words[0] = NULL;
+            }
+            printf(" *** MODIFIER: %s\n", modifier);
+        }
     }
 
     snprintf(request, 512, "%s/api/rp/v1/Templates/File/%s/Prepare",
@@ -461,11 +500,10 @@ static void prepare_report(command_context_t * context)
     curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, stdout);
     curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, NULL);
 
-#define PREPARE_JSON_MAX_SIZE   1024
+#define PREPARE_JSON_MAX_SIZE   1024 * 128
 
-    char name_holder[250];
-    if (context->last_object.name)
-    {
+    char name_holder[256];
+    if (context->last_object.name) {
         strcpy(name_holder, context->last_object.name);
         int len = strlen(name_holder);
         if (len > 4) {
@@ -481,7 +519,7 @@ static void prepare_report(command_context_t * context)
     //    printf("::: %s\n", name_holder);
 
     char * post = alloca(PREPARE_JSON_MAX_SIZE);
-    snprintf(post, PREPARE_JSON_MAX_SIZE,
+    int bytes = snprintf(post, PREPARE_JSON_MAX_SIZE,
         "{ \"name\": \"%s\", \"parentFolderId\": \"%s\"}",
         name_holder,
         context->reports_current_folder);
@@ -506,17 +544,19 @@ static void prepare_report(command_context_t * context)
     curl_easy_setopt(context->curl, CURLOPT_POSTFIELDS, NULL);
     curl_easy_setopt(context->curl, CURLOPT_POST, 0);
 
-    if (context->received_json_size > 0)
-    {
-        char * json_stream = alloca(context->received_json_size + 1);
-        json_response(context, json_stream);
-        // printf("--- %s\n", json_stream);
-        json_FileInfo(json_stream, context->received_json_size, context);
-        if (verbose)
-            show_context(context);
-    }
-    else
+    if (context->received_json_size <= 0) {
         fprintf(stderr, "Empty response on preparing report\n");
+        return;
+    }
+    char * json_stream = alloca(context->received_json_size + 1);
+    json_response(context, json_stream);
+    // printf("--- %s\n", json_stream);
+    json_FileInfo(json_stream, context->received_json_size, context);
+    if (verbose)
+        show_context(context);
+    if (context->words_count == 1) {
+        next_command(context, context->words[0]);
+    }
 }
 
 void show_directory(command_context_t * context)
@@ -669,12 +709,6 @@ static void upload_file(command_context_t * context)
     }
     filename = parse_filename(context, context->words[0], 0);
 
-    //int i, pos = 0;
-    //for (i=0; filename[i]; ++i) {
-    //    pos += snprintf(encoded_filename + pos, 255 - pos, "%%%02X", filename[i]);
-    //}
-//    snprintf(encoded_filename, 255, "\"%s\"", filename);
-
     if (access(filename, R_OK) == -1) {
         fprintf(stderr, "File not exist or access denied for: %s", filename);
         return;
@@ -714,8 +748,6 @@ static void upload_file(command_context_t * context)
     char * content = base64_encode(input, source_size, &encoded_size);
 
 #define REQUEST_BUFF_SIZE (encoded_size + 192)
-
-    printf("FILENAME: %s\n", filename);
 
     char * post = alloca(REQUEST_BUFF_SIZE);
     snprintf(post, REQUEST_BUFF_SIZE, "{ \"name\": \"%s\", \"content\": \"%s\"}",
@@ -878,8 +910,6 @@ static void show_information(command_context_t * context)
     if (res != CURLE_OK)
         fprintf(stderr, "curl_easy_perform() failed: %s\n",
             curl_easy_strerror(res));
-
-    show_context(context);
 }
 
 static uint parse_working_directory_json(char *in, uint size, uint nmemb, char *out)
@@ -1282,6 +1312,8 @@ int main(void)
         return EXIT_FAILURE;
     }
 
+    read_history("frcloud.history");
+
     curl_global_init(CURL_GLOBAL_DEFAULT);
     context.curl = curl_easy_init();
     if (context.curl) {
@@ -1291,5 +1323,10 @@ int main(void)
         curl_easy_cleanup(context.curl);
     }
     curl_global_cleanup();
+
+    if (write_history("frcloud.history") != 0) { 
+        fprintf(stderr, "Unable save Cloud console history\n");
+    }
+    history_truncate_file("frcloud.history", 25);
     return 0;
 }
