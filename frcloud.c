@@ -1312,7 +1312,9 @@ int main(void)
         return EXIT_FAILURE;
     }
 
-    read_history("frcloud.history");
+#if defined(HISTORY_FILE)
+    read_history(HISTORY_FILE);
+#endif
 
     curl_global_init(CURL_GLOBAL_DEFAULT);
     context.curl = curl_easy_init();
@@ -1324,9 +1326,12 @@ int main(void)
     }
     curl_global_cleanup();
 
-    if (write_history("frcloud.history") != 0) { 
+#if defined(HISTORY_FILE)
+    if (write_history(HISTORY_FILE) != 0) {
         fprintf(stderr, "Unable save Cloud console history\n");
     }
-    history_truncate_file("frcloud.history", 25);
+    history_truncate_file(HISTORY_FILE, 25);
+#endif
+
     return 0;
 }

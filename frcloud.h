@@ -10,6 +10,9 @@
 #define DEFAULT_SERVER      "https://fastreport.cloud"
 #define ID_SIZE 24
 
+// Undefine this to disable storing history to file
+#define HISTORY_FILE    ".frcloud.hostory"
+
 typedef unsigned long uint64_t;
 
 typedef struct {
