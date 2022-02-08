@@ -118,7 +118,6 @@ static const char const * const modes[3] = {
     "\n\x1B[32m\x1B[1mExports> \x1B[0m"
 };
 
-static int  verbose = 0;
 static int stop;
 static int file_body;
 static dnld_params_t dnld_params;
@@ -374,7 +373,7 @@ static void use_object(command_context_t * context)
             fprintf(stderr, "json_ReportInfo = %d\n", status);
             break;
         }
-        if (verbose)
+        if (context->verbose)
             show_context(context);
         if (context->words_count == 1)
             next_command(context, context->words[0]);
@@ -426,7 +425,7 @@ static void select_object(command_context_t * context)
             fprintf(stderr, "json_ReportInfo = %d\n", status);
             break;
         }
-        if (verbose)
+        if (context->verbose)
             show_context(context);
         if (context->words_count == 1) {
             next_command(context, context->words[0]);
@@ -550,7 +549,7 @@ static void prepare_report(command_context_t * context)
     json_response(context, json_stream);
     // printf("--- %s\n", json_stream);
     json_FileInfo(json_stream, context->received_json_size, context);
-    if (verbose)
+    if (context->verbose)
         show_context(context);
     if (context->words_count == 1) {
         next_command(context, context->words[0]);
@@ -698,7 +697,7 @@ static void download_file(command_context_t * context)
     curl_easy_setopt(context->curl, CURLOPT_HTTPHEADER, NULL);
     curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, NULL);
     curl_easy_setopt(context->curl, CURLOPT_HEADERFUNCTION, NULL);
-    curl_easy_setopt(context->curl, CURLOPT_HEADERDATA, verbose ? stdout : NULL);
+    curl_easy_setopt(context->curl, CURLOPT_HEADERDATA, context->verbose ? stdout : NULL);
 }
 
 static void upload_file(command_context_t * context)
@@ -782,7 +781,7 @@ static void upload_file(command_context_t * context)
         char * json_stream = alloca(context->received_json_size);
         json_response(context, json_stream);
         json_FileInfo(json_stream, context->received_json_size, context);
-        if (verbose)
+        if (context->verbose)
             show_context(context);
     }
 
@@ -850,7 +849,7 @@ static void delete_remote_object(command_context_t * context)
 
     curl_easy_setopt(context->curl, CURLOPT_CUSTOMREQUEST, NULL);
     curl_easy_setopt(context->curl, CURLOPT_HEADERFUNCTION, NULL);
-    curl_easy_setopt(context->curl, CURLOPT_HEADERDATA, verbose ? stdout : NULL);
+    curl_easy_setopt(context->curl, CURLOPT_HEADERDATA, context->verbose ? stdout : NULL);
 
     /* Check for errors */
     if (res != CURLE_OK)
@@ -904,6 +903,10 @@ static void create_folder(command_context_t * context)
     curl_easy_setopt(context->curl, CURLOPT_HTTPHEADER, NULL);
     curl_easy_setopt(context->curl, CURLOPT_POSTFIELDS, NULL);
     curl_easy_setopt(context->curl, CURLOPT_POST, 0);
+
+    if (context->words_count == 1) {
+        next_command(context, context->words[0]);
+    }
 }
 
 static void show_information(command_context_t * context)
@@ -975,19 +978,25 @@ static void show_working_dicrectory_path(command_context_t * context)
 
 static void change_directory(command_context_t * context)
 {
+    char * uuid;
     if (context->words_count == 0)
     {
         printf("Current dir changed to %s root folder.\n", GetDomainMode(context));
         strcpy(GetCurrentFolder(context), GetRootFolder(context));
         return;
     }
-    if (strlen(context->words[0]) != strlen("606335ef377eaa000171a5ba"))
-    {
-        puts("This version supports UUID only as argument. Or no argument to change current folder to session_namespace's root");
+    uuid = parse_uuid(context, context->words[0]);
+    if (uuid == NULL) {
+        fprintf(stderr, "argument of 'cd' command is not ID:\n", context->words[0]);
         return;
     }
-    strcpy(GetCurrentFolder(context), context->words[0]);
-    printf("Directory changed to: %s", GetCurrentFolder(context));
+
+    strcpy(GetCurrentFolder(context), uuid);
+    if (context->words_count == 1) {
+        next_command(context, context->words[0]);
+    } 
+    else
+        printf("Directory changed to: %s", GetCurrentFolder(context));
 }
 
 static void logout_cloud(command_context_t * context)
@@ -1000,9 +1009,9 @@ static void local_dir_list(command_context_t * context)
 }
 static void switch_verbosity(command_context_t * context)
 {
-    verbose = verbose ? 0 : 1;
-    curl_easy_setopt(context->curl, CURLOPT_VERBOSE, verbose);
-    printf("curl verbose mode set to %s", verbose ? "Enabled" : "Disabled");
+    context->verbose = context->verbose ? 0 : 1;
+    curl_easy_setopt(context->curl, CURLOPT_VERBOSE, context->verbose);
+    printf("curl verbose mode set to %s", context->verbose ? "Enabled" : "Disabled");
 }
 static void list_screen_limit(command_context_t * context)
 {
@@ -1305,7 +1314,7 @@ void user_init(command_context_t * context, char * auth)
     curl_easy_setopt(context->curl, CURLOPT_USERPWD, auth);
     curl_easy_setopt(context->curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2_0);
     curl_easy_setopt(context->curl, CURLOPT_USERAGENT, "FastReport.Cloud/0.3 (Linux) libcurl");
-    curl_easy_setopt(context->curl, CURLOPT_VERBOSE, verbose);
+    curl_easy_setopt(context->curl, CURLOPT_VERBOSE, context->verbose);
     curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, init_cb);
     curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, context);
 

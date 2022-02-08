@@ -48,6 +48,7 @@ typedef struct {
 
 typedef struct {
     CURL    *   curl;
+    int             verbose;
     namespace_t     session_namespace;;
     report_info_t   last_object;
     char    *   command;
