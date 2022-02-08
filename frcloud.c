@@ -1032,6 +1032,14 @@ static void list_screen_limit(command_context_t * context)
         break;
     }
 }
+static void emtpy_command(command_context_t * context)
+{
+    if(context->words_count == 0) {
+        printf("Single empty command detected and parsed.");
+        return;
+    }
+    next_command(context, context->words[0]);
+}
 
 static void select_namespace(command_context_t * context);
 static void help(command_context_t * context);
@@ -1045,7 +1053,7 @@ command_record_t    commands[] = {
     {"export", select_namespace, "switch to exports namespace, can be used as a prefix", HELP_NAMESPSACES},
     {"ls",      show_directory, "show content of a folder within active namespace", HELP_LS},
     {"use",     use_object, "set active template, report, or document by it's UUID ", HELP_USE},
-    {"file",    select_object, "set active template, report, or document by it's human readble name", NULL},
+    {"file",    select_object, "set active template, report, or document by it's human readble name", HELP_FILE},
     {"prepare", prepare_report, "prepare report by it's UUID", NULL},
     {"search",  show_directory, "show directory context by mask", NULL},
     {"cd",      change_directory, "change current directory by it's UUID", NULL},
@@ -1059,6 +1067,7 @@ command_record_t    commands[] = {
     {"verbose", switch_verbosity, "toggle curl verbose mode ON/OFF", NULL},
     {"limit",   list_screen_limit, "show/set max count of items of 'ls' and 'search' commands", NULL},
     {"info",    show_information, "show various information", HELP_INFO},
+    {"and",     emtpy_command, "empty command that do nothing except improve readability of compound commands", NULL},
     {"exit",    logout_cloud, "exit from FastReport.Cloud console", HELP_EXIT},
     {NULL, NULL, NULL, NULL}
 };
