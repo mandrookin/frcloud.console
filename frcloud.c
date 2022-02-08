@@ -675,6 +675,7 @@ static void download_file(command_context_t * context)
     headers = curl_slist_append(headers, "Accept: text/html, application/xhtml+xml, application/xml, application/octet-stream");
     curl_easy_setopt(context->curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(context->curl, CURLOPT_HEADERFUNCTION, dnld_header_parse);
+    curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, stdout);
     curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, write_cb);
     dnld_params.curl = context->curl;
     curl_easy_setopt(context->curl, CURLOPT_HEADERDATA, &dnld_params);
@@ -683,7 +684,6 @@ static void download_file(command_context_t * context)
     file_body = -1;
     download_size = 0;
     res = curl_easy_perform(context->curl);
-    curl_easy_setopt(context->curl, CURLOPT_HTTPHEADER, NULL);
 
     if (file_body > 0)
     {
@@ -695,6 +695,11 @@ static void download_file(command_context_t * context)
     if (res != CURLE_OK)
         fprintf(stderr, "curl_easy_perform() failed: %s\n",
             curl_easy_strerror(res));
+
+    curl_slist_free_all(headers);
+    curl_easy_setopt(context->curl, CURLOPT_HTTPHEADER, NULL);
+    curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, NULL);
+    curl_easy_setopt(context->curl, CURLOPT_HEADERFUNCTION, NULL);
 }
 
 static void upload_file(command_context_t * context)
@@ -787,19 +792,39 @@ static void upload_file(command_context_t * context)
     }
 }
 
+size_t rm_header_parse(void *hdr, size_t size, size_t nmemb, void *userdata)
+{
+    const   size_t  cb = size * nmemb;
+    const   char    *hdr_str = hdr;
+    dnld_params_t *dnld_params = (dnld_params_t*)userdata;
+    char const*const cdtag = "Content-disposition:";
+
+    int http_code;
+    curl_easy_getinfo(dnld_params->curl, CURLINFO_RESPONSE_CODE, &http_code);
+    if (http_code != 204)
+    {
+        fprintf(stderr, "Request error code: %d\n", http_code);
+        return -1;
+    }
+    return cb;
+}
+
 static void delete_remote_object(command_context_t * context)
 {
     CURLcode res;
     char * object_type;
-    char * filename;
+    char * uuid = NULL;
     char request[512];
 
-    if (context->words_count != 1) {
+    if (context->words_count == 1) 
+    {
+        uuid = parse_uuid(context, context->words[0]);
+    }
+
+    if (uuid == NULL) {
         puts("Use rm/rmdir 'uuid' to delete file/directory. Where 'uuid' is unique identifier of file");
         return;
     }
-
-    filename = parse_uuid(context, context->words[0]);
 
     if (strcmp(context->command, "rm") == 0)
         object_type = "File";
@@ -814,8 +839,9 @@ static void delete_remote_object(command_context_t * context)
         DEFAULT_SERVER,
         GetDomainMode(context),
         object_type,
-        filename);
+        uuid);
 
+    curl_easy_setopt(context->curl, CURLOPT_HEADERFUNCTION, rm_header_parse);
     curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, stdout);
     curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, NULL);
     curl_easy_setopt(context->curl, CURLOPT_CUSTOMREQUEST, "DELETE");
