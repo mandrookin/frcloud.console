@@ -302,7 +302,7 @@ static void json_response(command_context_t * context, char * json_stream)
 #pragma endregion
 
 static void next_command(command_context_t * context, char * command);
-static char * parse_filename(command_context_t * context, char * input);
+static char * parse_filename(command_context_t * context, char * input, int enclose);
 static char * parse_uuid(command_context_t * context, char * input);
 
 static void show_context(command_context_t * context)
@@ -375,645 +375,813 @@ static void use_object(command_context_t * context)
             show_context(context);
         if (context->words_count == 1)
             next_command(context, context->words[0]);
-        } while (0);
+    } while (0);
+}
+
+static void select_object(command_context_t * context)
+{
+    CURLcode res;
+    int status;
+    char * filename;
+    char request[512];
+    char encoded_filename[256];
+
+    if (context->words_count != 1 || context->words[0] == NULL) {
+        printf("Use> file filename\n  where 'filename' is a path to local file\n");
+        return;
+    }
+    filename = parse_filename(context, context->words[0], 0);
+
+    int i, pos = 0;
+    for (i=0; filename[i]; ++i) {
+        pos += snprintf(encoded_filename + pos, 255 - pos, "%%%02X", (unsigned char) filename[i]);
     }
 
-    static void select_object(command_context_t * context)
-    {
-        CURLcode res;
-        int status;
-        char request[512];
+    snprintf(request, 512, "%s/api/rp/v1/%s/Folder/%s/ListFiles?skip=0&take=1&orderBy=editedTime&desc=True&searchPattern=%s",
+        DEFAULT_SERVER,
+        GetDomainMode(context),
+        GetCurrentFolder(context),
+        encoded_filename);
 
-        if (context->words_count != 1) {
-            fprintf(stderr, "'file' command must have a name parameter\n");
-            return;
-        }
+    printf("SELECT: %s\n", request);
 
-        snprintf(request, 512, "%s/api/rp/v1/%s/Folder/%s/ListFiles?skip=0&take=1&orderBy=editedTime&desc=True&searchPattern=%s",
-            DEFAULT_SERVER,
-            GetDomainMode(context),
-            GetCurrentFolder(context),
-            context->words[0]);
+    json_request(context, request);
 
-        json_request(context, request);
-
-        if (context->received_json_size > 0)
-        {
-            char * json_stream = alloca(context->received_json_size);
-            json_response(context, json_stream);
-#if DEBUG_DIRECTORY_JSON
-            json_stream[context->received_json_size] = 0;
-            puts(json_stream);
-#endif
-            status = json_SelectFile(json_stream, context->received_json_size, context);
-            if (status < 0)
-                fprintf(stderr, "json_ReportInfo = %d\n", status);
-            if (verbose)
-                show_context(context);
-        }
-        else
+    do {
+        if (context->received_json_size < 0) {
             fprintf(stderr, "Unable select cloud file object: %s\n", context->words[1]);
+            break;
+        }
+        char * json_stream = alloca(context->received_json_size);
+        json_response(context, json_stream);
+#if DEBUG_DIRECTORY_JSON
+        json_stream[context->received_json_size] = 0;
+        puts(json_stream);
+#endif
+        status = json_SelectFile(json_stream, context->received_json_size, context);
+        if (status < 0) {
+            fprintf(stderr, "json_ReportInfo = %d\n", status);
+            break;
+        }
+        if (verbose)
+            show_context(context);
+        if (context->words_count == 1) {
+            next_command(context, context->words[0]);
+        }
+    } while (0);
+}
+
+static void prepare_report(command_context_t * context)
+{
+    CURLcode    res;
+    char        * uuid, *next;
+    char        request[512];
+
+    switch (context->words_count)
+    {
+    case 0:
+        uuid = context->last_object.uuid;
+        break;
+    case 1:
+        uuid = context->words[0];
+        break;
+    default:
+        fprintf(stderr, "FSM error at prepare report. Give up.\n");
+        return;
     }
 
-    static void prepare_report(command_context_t * context)
-    {
-        CURLcode    res;
-        char        * uuid, *next;
-        char        request[512];
+    snprintf(request, 512, "%s/api/rp/v1/Templates/File/%s/Prepare",
+        DEFAULT_SERVER,
+        uuid);
 
-        switch (context->words_count)
-        {
-        case 0:
-            uuid = context->last_object.uuid;
-            break;
-        case 1:
-            uuid = context->words[0];
-            break;
-        default:
-            fprintf(stderr, "FSM error at prepare report. Give up.\n");
-            return;
-        }
-
-        snprintf(request, 512, "%s/api/rp/v1/Templates/File/%s/Prepare",
-            DEFAULT_SERVER,
-            uuid);
-
-        struct curl_slist *headers = NULL;
-        headers = curl_slist_append(headers, "Content-Type: application/json-patch+json");
-        curl_easy_setopt(context->curl, CURLOPT_HTTPHEADER, headers);
-        curl_easy_setopt(context->curl, CURLOPT_URL, request);
-        curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, stdout);
-        curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, NULL);
+    struct curl_slist *headers = NULL;
+    headers = curl_slist_append(headers, "Content-Type: application/json-patch+json");
+    curl_easy_setopt(context->curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(context->curl, CURLOPT_URL, request);
+    curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, stdout);
+    curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, NULL);
 
 #define PREPARE_JSON_MAX_SIZE   1024
 
-        char name_holder[250];
-        if (context->last_object.name)
-        {
-            strcpy(name_holder, context->last_object.name);
-            int len = strlen(name_holder);
-            if (len > 4) {
-                if (strcmp(&name_holder[len - 4], ".frx") == 0)
-                    name_holder[len - 4] = 0;
-            }
-            strcat(name_holder, ".fpx");
-        }
-        else
-        {
-            strcpy(name_holder, "unnamed.fpx");
-        }
-        //    printf("::: %s\n", name_holder);
-
-        char * post = alloca(PREPARE_JSON_MAX_SIZE);
-        snprintf(post, PREPARE_JSON_MAX_SIZE,
-            "{ \"name\": \"%s\", \"parentFolderId\": \"%s\"}",
-            name_holder,
-            context->reports_current_folder);
-
-        curl_easy_setopt(context->curl, CURLOPT_POSTFIELDS, post);
-
-        curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, write_json_chunk);
-
-        context->received_json_size = 0;
-        context->json_chunks_head = NULL;
-        context->json_chunks_tail = NULL;
-
-        curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, context);
-
-        res = curl_easy_perform(context->curl);
-        if (res != CURLE_OK)
-            fprintf(stderr, "curl_easy_perform() failed: %s\n",
-                curl_easy_strerror(res));
-
-        curl_slist_free_all(headers);
-        curl_easy_setopt(context->curl, CURLOPT_HTTPHEADER, NULL);
-        curl_easy_setopt(context->curl, CURLOPT_POSTFIELDS, NULL);
-        curl_easy_setopt(context->curl, CURLOPT_POST, 0);
-
-        if (context->received_json_size > 0)
-        {
-            char * json_stream = alloca(context->received_json_size + 1);
-            json_response(context, json_stream);
-            // printf("--- %s\n", json_stream);
-            json_FileInfo(json_stream, context->received_json_size, context);
-            if (verbose)
-                show_context(context);
-        }
-        else
-            fprintf(stderr, "Empty response on preparing report\n");
-    }
-
-    void show_directory(command_context_t * context)
+    char name_holder[250];
+    if (context->last_object.name)
     {
-        CURLcode res;
-        char    *   dir_uuid;
-        char        search_pattern[128];
-        char        request[512];
+        strcpy(name_holder, context->last_object.name);
+        int len = strlen(name_holder);
+        if (len > 4) {
+            if (strcmp(&name_holder[len - 4], ".frx") == 0)
+                name_holder[len - 4] = 0;
+        }
+        strcat(name_holder, ".fpx");
+    }
+    else
+    {
+        strcpy(name_holder, "unnamed.fpx");
+    }
+    //    printf("::: %s\n", name_holder);
 
-        search_pattern[0] = '\0';
-        if (context->words_count == 0) {
-            snprintf(search_pattern, sizeof(search_pattern), "?skip=0&take=%u",
-                context->take_count);
+    char * post = alloca(PREPARE_JSON_MAX_SIZE);
+    snprintf(post, PREPARE_JSON_MAX_SIZE,
+        "{ \"name\": \"%s\", \"parentFolderId\": \"%s\"}",
+        name_holder,
+        context->reports_current_folder);
+
+    curl_easy_setopt(context->curl, CURLOPT_POSTFIELDS, post);
+
+    curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, write_json_chunk);
+
+    context->received_json_size = 0;
+    context->json_chunks_head = NULL;
+    context->json_chunks_tail = NULL;
+
+    curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, context);
+
+    res = curl_easy_perform(context->curl);
+    if (res != CURLE_OK)
+        fprintf(stderr, "curl_easy_perform() failed: %s\n",
+            curl_easy_strerror(res));
+
+    curl_slist_free_all(headers);
+    curl_easy_setopt(context->curl, CURLOPT_HTTPHEADER, NULL);
+    curl_easy_setopt(context->curl, CURLOPT_POSTFIELDS, NULL);
+    curl_easy_setopt(context->curl, CURLOPT_POST, 0);
+
+    if (context->received_json_size > 0)
+    {
+        char * json_stream = alloca(context->received_json_size + 1);
+        json_response(context, json_stream);
+        // printf("--- %s\n", json_stream);
+        json_FileInfo(json_stream, context->received_json_size, context);
+        if (verbose)
+            show_context(context);
+    }
+    else
+        fprintf(stderr, "Empty response on preparing report\n");
+}
+
+void show_directory(command_context_t * context)
+{
+    CURLcode res;
+    char    *   dir_uuid;
+    char        search_pattern[128];
+    char        request[512];
+
+    search_pattern[0] = '\0';
+    if (context->words_count == 0) {
+        snprintf(search_pattern, sizeof(search_pattern), "?skip=0&take=%u",
+            context->take_count);
+        dir_uuid = GetCurrentFolder(context);
+    }
+    else if (context->words_count == 1) {
+        if (strcmp(context->command, "ls") == 0) {
+            dir_uuid = context->words[0];
+        }
+        else if (strcmp(context->command, "search") == 0) {
             dir_uuid = GetCurrentFolder(context);
-        }
-        else if (context->words_count == 1) {
-            if (strcmp(context->command, "ls") == 0) {
-                dir_uuid = context->words[0];
-            }
-            else if (strcmp(context->command, "search") == 0) {
-                dir_uuid = GetCurrentFolder(context);
-                snprintf(search_pattern, sizeof(search_pattern), "?skip=0&take=%u&searchPattern=%s",
-                    context->take_count,
-                    context->words[0]);
-            }
-            else {
-                fprintf(stderr, "Unknown command extension: %s\n", context->command);
-                return;
-            }
+            snprintf(search_pattern, sizeof(search_pattern), "?skip=0&take=%u&searchPattern=%s",
+                context->take_count,
+                context->words[0]);
         }
         else {
-            fprintf(stderr, "change dir command supports only one or zero arguments\n");
+            fprintf(stderr, "Unknown command extension: %s\n", context->command);
             return;
         }
-
-        snprintf(request, 512, "%s/api/rp/v1/%s/Folder/%s/ListFolderAndFiles%s",
-            DEFAULT_SERVER,
-            GetDomainMode(context),
-            dir_uuid,
-            search_pattern);
-
-        json_request(context, request);
-
-        if (context->received_json_size > 0)
-        {
-            char * json_stream = alloca(context->received_json_size);
-            json_response(context, json_stream);
-#if DEBUG_DIRECTORY_JSON
-            json_stream[context->received_json_size] = 0;
-            puts(json_stream);
-#endif
-            draw_json_ListFolderAndFiles(json_stream, context->received_json_size);
-        }
-        else {
-            printf("Folder '%s' is empty\n", dir_uuid);
-        }
+    }
+    else {
+        fprintf(stderr, "change dir command supports only one or zero arguments\n");
+        return;
     }
 
-    /* curl write callback, to fill tidy's input buffer...  */
-    static uint write_cb(char *in, uint size, uint nmemb, char *out)
-    {
-        uint r = size * nmemb;
+    snprintf(request, 512, "%s/api/rp/v1/%s/Folder/%s/ListFolderAndFiles%s",
+        DEFAULT_SERVER,
+        GetDomainMode(context),
+        dir_uuid,
+        search_pattern);
 
-        if (file_body > 0)
-        {
-            int l = write(file_body, in, r);
-            if (l < 0) {
-                printf("written %d bytes errno %d\n", l, errno);
-                r = 0;
-            }
-            else
-                download_size += l;
+    json_request(context, request);
+
+    if (context->received_json_size > 0)
+    {
+        char * json_stream = alloca(context->received_json_size);
+        json_response(context, json_stream);
+#if DEBUG_DIRECTORY_JSON
+        json_stream[context->received_json_size] = 0;
+        puts(json_stream);
+#endif
+        draw_json_ListFolderAndFiles(json_stream, context->received_json_size);
+    }
+    else {
+        printf("Folder '%s' is empty\n", dir_uuid);
+    }
+}
+
+/* curl write callback, to fill tidy's input buffer...  */
+static uint write_cb(char *in, uint size, uint nmemb, char *out)
+{
+    uint r = size * nmemb;
+
+    if (file_body > 0)
+    {
+        int l = write(file_body, in, r);
+        if (l < 0) {
+            printf("written %d bytes errno %d\n", l, errno);
+            r = 0;
         }
         else
-        {
-            printf("Unable open file '%s' errno %d\n", dnld_params.remote_fname, errno);
-        }
-        //    write(STDOUT, in, r);
-        return r;
+            download_size += l;
     }
-
-    static void download_file(command_context_t * context)
+    else
     {
-        CURLcode res;
-        char * uuid = NULL;
-        char request[512];
-        char op;
+        printf("Unable open file '%s' errno %d\n", dnld_params.remote_fname, errno);
+    }
+    //    write(STDOUT, in, r);
+    return r;
+}
 
-        if (context->words_count == 0) {
-            if (context->last_object.uuid[0] == 0) {
-                puts("Active object is not available yet");
-                return;
-            }
-            // Take UUID from resuilt of previous command
-            printf("UUID: %s\n", context->last_object.uuid);
-            uuid = context->last_object.uuid;
+static void download_file(command_context_t * context)
+{
+    CURLcode res;
+    char * uuid = NULL;
+    char request[512];
+    char op;
+
+    if (context->words_count == 0) {
+        if (context->last_object.uuid[0] == 0) {
+            puts("Active object is not available yet");
+            return;
         }
-        else // requires switch session_namespace
-            uuid = context->words[0];
+        // Take UUID from resuilt of previous command
+        printf("UUID: %s\n", context->last_object.uuid);
+        uuid = context->last_object.uuid;
+    }
+    else // requires switch session_namespace
+        uuid = context->words[0];
 
-        switch (context->session_namespace) {
-        case Templates:
-            op = 't';
-            break;
-        case Reports:
-            op = 'r';
-            break;
-        case Exports:
-            op = 'e';
-            break;
-        }
-        snprintf(request, 512, "%s/download/%c/%s", DEFAULT_SERVER, op, uuid);
+    switch (context->session_namespace) {
+    case Templates:
+        op = 't';
+        break;
+    case Reports:
+        op = 'r';
+        break;
+    case Exports:
+        op = 'e';
+        break;
+    }
+    snprintf(request, 512, "%s/download/%c/%s", DEFAULT_SERVER, op, uuid);
 
-        // 
-        struct curl_slist *headers = NULL;
-        headers = curl_slist_append(headers, "Accept: text/html, application/xhtml+xml, application/xml, application/octet-stream");
-        curl_easy_setopt(context->curl, CURLOPT_HTTPHEADER, headers);
-        curl_easy_setopt(context->curl, CURLOPT_HEADERFUNCTION, dnld_header_parse);
-        curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, write_cb);
-        dnld_params.curl = context->curl;
-        curl_easy_setopt(context->curl, CURLOPT_HEADERDATA, &dnld_params);
-        curl_easy_setopt(context->curl, CURLOPT_URL, request);
+    // 
+    struct curl_slist *headers = NULL;
+    headers = curl_slist_append(headers, "Accept: text/html, application/xhtml+xml, application/xml, application/octet-stream");
+    curl_easy_setopt(context->curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(context->curl, CURLOPT_HEADERFUNCTION, dnld_header_parse);
+    curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, write_cb);
+    dnld_params.curl = context->curl;
+    curl_easy_setopt(context->curl, CURLOPT_HEADERDATA, &dnld_params);
+    curl_easy_setopt(context->curl, CURLOPT_URL, request);
 
+    file_body = -1;
+    download_size = 0;
+    res = curl_easy_perform(context->curl);
+    curl_easy_setopt(context->curl, CURLOPT_HTTPHEADER, NULL);
+
+    if (file_body > 0)
+    {
+        close(file_body);
+        printf("Load %d bytes of '%s'\n", download_size, dnld_params.remote_fname);
         file_body = -1;
-        download_size = 0;
-        res = curl_easy_perform(context->curl);
-        curl_easy_setopt(context->curl, CURLOPT_HTTPHEADER, NULL);
+    }
+    /* Check for errors */
+    if (res != CURLE_OK)
+        fprintf(stderr, "curl_easy_perform() failed: %s\n",
+            curl_easy_strerror(res));
+}
 
-        if (file_body > 0)
-        {
-            close(file_body);
-            printf("Load %d bytes of '%s'\n", download_size, dnld_params.remote_fname);
-            file_body = -1;
-        }
-        /* Check for errors */
-        if (res != CURLE_OK)
-            fprintf(stderr, "curl_easy_perform() failed: %s\n",
-                curl_easy_strerror(res));
+static void upload_file(command_context_t * context)
+{
+    CURLcode    res;
+    char    *   filename;
+    char        request[512];
+
+    if (context->words_count != 1 || context->words[0] == NULL) {
+        printf("Use> put filename\n  where 'filename' is path to local file\n");
+        return;
+    }
+    filename = parse_filename(context, context->words[0], 0);
+
+    //int i, pos = 0;
+    //for (i=0; filename[i]; ++i) {
+    //    pos += snprintf(encoded_filename + pos, 255 - pos, "%%%02X", filename[i]);
+    //}
+//    snprintf(encoded_filename, 255, "\"%s\"", filename);
+
+    if (access(filename, R_OK) == -1) {
+        fprintf(stderr, "File not exist or access denied for: %s", filename);
+        return;
     }
 
-    static void upload_file(command_context_t * context)
+    size_t encoded_size;
+
+    int source_file = open(filename, O_RDONLY);
+    if (source_file < 0) {
+        fprintf(stderr, "Unable open source file: %s", filename);
+        return;
+    }
+    int source_len = lseek(source_file, 0, SEEK_END);
+    lseek(source_file, 0, SEEK_SET);
+    if (source_len > 30 * 1024)
     {
-        CURLcode    res;
-        char    *   filename;
-        char        request[512];
+        printf("Source file size exceeds 30Kb size limmit\n");
+    }
 
-        if (context->words_count != 1 || context->words[0] == NULL) {
-            printf("Use> put filename\n  where 'filename' is path to local file\n");
-            return;
-        }
-        filename = parse_filename(context, context->words[0]);
+    char * input = alloca(source_len);
+    if (input == NULL)
+    {
+        fprintf(stderr, "Unable allocate memory on stack\n");
+        return;
+    }
+    int source_size = read(source_file, input, source_len);
+    close(source_file);
+    if (source_size < 0) {
+        fprintf(stderr, "Unable read source file: %s", filename);
+        return;
+    }
+    if (source_size != source_len) {
+        fprintf(stderr, "Unable read (%d != %d) source file: %s", source_size, source_len, filename);
+        return;
+    }
 
-        if (access(filename, R_OK) == -1) {
-            fprintf(stderr, "File not exist or access denied for: %s", filename);
-            return;
-        }
-
-        size_t encoded_size;
-
-        int source_file = open(filename, O_RDONLY);
-        if (source_file < 0) {
-            fprintf(stderr, "Unable open source file: %s", filename);
-            return;
-        }
-        int source_len = lseek(source_file, 0, SEEK_END);
-        lseek(source_file, 0, SEEK_SET);
-        if (source_len > 30 * 1024)
-        {
-            printf("Source file size exceeds 30Kb size limmit\n");
-        }
-
-        char * input = alloca(source_len);
-        if (input == NULL)
-        {
-            fprintf(stderr, "Unable allocate memory on stack\n");
-            return;
-        }
-        int source_size = read(source_file, input, source_len);
-        close(source_file);
-        if (source_size < 0) {
-            fprintf(stderr, "Unable read source file: %s", filename);
-            return;
-        }
-        if (source_size != source_len) {
-            fprintf(stderr, "Unable read (%d != %d) source file: %s", source_size, source_len, filename);
-            return;
-        }
-
-        char * content = base64_encode(input, source_size, &encoded_size);
+    char * content = base64_encode(input, source_size, &encoded_size);
 
 #define REQUEST_BUFF_SIZE (encoded_size + 192)
 
-        char * post = alloca(REQUEST_BUFF_SIZE);
-        snprintf(post, REQUEST_BUFF_SIZE, "{ \"name\": \"%s\", \"content\": \"%s\"}",
-            filename,
-            content);
-        free(content);
+    printf("FILENAME: %s\n", filename);
 
-        curl_easy_setopt(context->curl, CURLOPT_POSTFIELDS, post);
+    char * post = alloca(REQUEST_BUFF_SIZE);
+    snprintf(post, REQUEST_BUFF_SIZE, "{ \"name\": \"%s\", \"content\": \"%s\"}",
+        filename,
+        content);
+    free(content);
 
-        struct curl_slist *headers = NULL;
-        headers = curl_slist_append(headers, "Content-Type: application/json-patch+json");
-        curl_easy_setopt(context->curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(context->curl, CURLOPT_POSTFIELDS, post);
 
-        snprintf(request, 512, "%s/api/rp/v1/%s/Folder/%s/File",
-            DEFAULT_SERVER,
-            GetDomainMode(context),
-            GetCurrentFolder(context));
+    struct curl_slist *headers = NULL;
+    headers = curl_slist_append(headers, "Content-Type: application/json-patch+json");
+    curl_easy_setopt(context->curl, CURLOPT_HTTPHEADER, headers);
 
-        json_request(context, request);
+    snprintf(request, 512, "%s/api/rp/v1/%s/Folder/%s/File",
+        DEFAULT_SERVER,
+        GetDomainMode(context),
+        GetCurrentFolder(context));
 
-        curl_slist_free_all(headers);
-        curl_easy_setopt(context->curl, CURLOPT_HTTPHEADER, NULL);
-        curl_easy_setopt(context->curl, CURLOPT_POSTFIELDS, NULL);
-        curl_easy_setopt(context->curl, CURLOPT_POST, 0);
+    json_request(context, request);
 
-        if (context->received_json_size > 0)
-        {
-            char * json_stream = alloca(context->received_json_size);
-            json_response(context, json_stream);
-            json_FileInfo(json_stream, context->received_json_size, context);
-            if (verbose)
-                show_context(context);
-        }
+    curl_slist_free_all(headers);
+    curl_easy_setopt(context->curl, CURLOPT_HTTPHEADER, NULL);
+    curl_easy_setopt(context->curl, CURLOPT_POSTFIELDS, NULL);
+    curl_easy_setopt(context->curl, CURLOPT_POST, 0);
 
-        if (context->words_count == 1) {
-            next_command(context, context->words[0]);
-        }
+    if (context->received_json_size > 0)
+    {
+        char * json_stream = alloca(context->received_json_size);
+        json_response(context, json_stream);
+        json_FileInfo(json_stream, context->received_json_size, context);
+        if (verbose)
+            show_context(context);
     }
 
-    static void delete_remote_object(command_context_t * context)
-    {
-        CURLcode res;
-        char * object_type;
-        char * filename;
-        char request[512];
+    if (context->words_count == 1) {
+        next_command(context, context->words[0]);
+    }
+}
 
-        if (context->words_count != 1) {
-            puts("Use rm/rmdir 'uuid' to delete file/directory. Where 'uuid' is unique identifier of file");
-            return;
-        }
+static void delete_remote_object(command_context_t * context)
+{
+    CURLcode res;
+    char * object_type;
+    char * filename;
+    char request[512];
 
-        filename = parse_filename(context, context->words[0]);
-
-        if (strcmp(context->command, "rm") == 0)
-            object_type = "File";
-        else if (strcmp(context->command, "rmdir") == 0)
-            object_type = "Folder";
-        else {
-            fprintf(stderr, "Unknown delete command: %s\n", context->command);
-            return;
-        }
-
-        snprintf(request, 512, "%s/api/rp/v1/%s/%s/%s",
-            DEFAULT_SERVER,
-            GetDomainMode(context),
-            object_type,
-            filename);
-
-        curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, stdout);
-        curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, NULL);
-        curl_easy_setopt(context->curl, CURLOPT_CUSTOMREQUEST, "DELETE");
-        curl_easy_setopt(context->curl, CURLOPT_URL, request);
-
-        res = curl_easy_perform(context->curl);
-
-        curl_easy_setopt(context->curl, CURLOPT_CUSTOMREQUEST, NULL);
-
-        /* Check for errors */
-        if (res != CURLE_OK)
-            fprintf(stderr, "curl_easy_perform() failed: %s\n",
-                curl_easy_strerror(res));
-
-        if (context->words_count == 1) {
-            next_command(context, context->words[0]);
-        }
+    if (context->words_count != 1) {
+        puts("Use rm/rmdir 'uuid' to delete file/directory. Where 'uuid' is unique identifier of file");
+        return;
     }
 
-    static void create_folder(command_context_t * context)
-    {
+    filename = parse_uuid(context, context->words[0]);
+
+    if (strcmp(context->command, "rm") == 0)
+        object_type = "File";
+    else if (strcmp(context->command, "rmdir") == 0)
+        object_type = "Folder";
+    else {
+        fprintf(stderr, "Unknown delete command: %s\n", context->command);
+        return;
+    }
+
+    snprintf(request, 512, "%s/api/rp/v1/%s/%s/%s",
+        DEFAULT_SERVER,
+        GetDomainMode(context),
+        object_type,
+        filename);
+
+    curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, stdout);
+    curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, NULL);
+    curl_easy_setopt(context->curl, CURLOPT_CUSTOMREQUEST, "DELETE");
+    curl_easy_setopt(context->curl, CURLOPT_URL, request);
+
+    res = curl_easy_perform(context->curl);
+
+    curl_easy_setopt(context->curl, CURLOPT_CUSTOMREQUEST, NULL);
+
+    /* Check for errors */
+    if (res != CURLE_OK)
+        fprintf(stderr, "curl_easy_perform() failed: %s\n",
+            curl_easy_strerror(res));
+
+    if (context->words_count == 1) {
+        next_command(context, context->words[0]);
+    }
+}
+
+static void create_folder(command_context_t * context)
+{
 #define CREATE_BUFF_SIZE 4096
-        CURLcode res;
-        char request[512];
+    CURLcode res;
+    char request[512];
 
-        if (context->words_count != 1) {
-            printf("Use> mkdir name\n  where 'name' is a folder name\n");
-            return;
-        }
-
-        char * filename = context->words[0];
-        snprintf(request, sizeof(request), "%s/api/rp/v1/%s/Folder/%s/Folder",
-            DEFAULT_SERVER,
-            GetDomainMode(context),
-            GetCurrentFolder(context));
-
-        char * post = alloca(CREATE_BUFF_SIZE);
-        snprintf(post, CREATE_BUFF_SIZE,
-            "{ \"name\": \"%s\", \"tags\" : [ \"%s\" ], \"icon\" : \"%s\" }",
-            filename, "console", "help");
-
-        curl_easy_setopt(context->curl, CURLOPT_POSTFIELDS, post);
-
-        struct curl_slist *headers = NULL;
-        headers = curl_slist_append(headers, "Content-Type: application/json-patch+json");
-        curl_easy_setopt(context->curl, CURLOPT_HTTPHEADER, headers);
-        curl_easy_setopt(context->curl, CURLOPT_URL, request);
-        curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, stdout);
-        //////////curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, context);
-
-        res = curl_easy_perform(context->curl);
-        if (res != CURLE_OK)
-            fprintf(stderr, "curl_easy_perform() failed: %s\n",
-                curl_easy_strerror(res));
-
-        curl_slist_free_all(headers);
-        curl_easy_setopt(context->curl, CURLOPT_HTTPHEADER, NULL);
-        curl_easy_setopt(context->curl, CURLOPT_POSTFIELDS, NULL);
-        curl_easy_setopt(context->curl, CURLOPT_POST, 0);
+    if (context->words_count != 1) {
+        printf("Use> mkdir name\n  where 'name' is a folder name\n");
+        return;
     }
 
-    static void show_information(command_context_t * context)
-    {
-        CURLcode res;
-        puts("----------------------- SERVER CONFIGURATION ----------------------");
+    char * filename = context->words[0];
+    snprintf(request, sizeof(request), "%s/api/rp/v1/%s/Folder/%s/Folder",
+        DEFAULT_SERVER,
+        GetDomainMode(context),
+        GetCurrentFolder(context));
 
-        curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, stdout);
-        curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, NULL);
+    char * post = alloca(CREATE_BUFF_SIZE);
+    snprintf(post, CREATE_BUFF_SIZE,
+        "{ \"name\": \"%s\", \"tags\" : [ \"%s\" ], \"icon\" : \"%s\" }",
+        filename, "console", "help");
 
-        curl_easy_setopt(context->curl, CURLOPT_URL, DEFAULT_SERVER "/api/v1/Configuration");
+    curl_easy_setopt(context->curl, CURLOPT_POSTFIELDS, post);
 
-        res = curl_easy_perform(context->curl);
-        /* Check for errors */
-        if (res != CURLE_OK)
-            fprintf(stderr, "curl_easy_perform() failed: %s\n",
-                curl_easy_strerror(res));
+    struct curl_slist *headers = NULL;
+    headers = curl_slist_append(headers, "Content-Type: application/json-patch+json");
+    curl_easy_setopt(context->curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(context->curl, CURLOPT_URL, request);
+    curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, stdout);
+    //////////curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, context);
 
-        puts("\n----------------------- SHOW PROFILE ----------------------");
-        curl_easy_setopt(context->curl, CURLOPT_URL, DEFAULT_SERVER "/api/manage/v1/UserProfile");
+    res = curl_easy_perform(context->curl);
+    if (res != CURLE_OK)
+        fprintf(stderr, "curl_easy_perform() failed: %s\n",
+            curl_easy_strerror(res));
 
-        res = curl_easy_perform(context->curl);
-        /* Check for errors */
-        if (res != CURLE_OK)
-            fprintf(stderr, "curl_easy_perform() failed: %s\n",
-                curl_easy_strerror(res));
+    curl_slist_free_all(headers);
+    curl_easy_setopt(context->curl, CURLOPT_HTTPHEADER, NULL);
+    curl_easy_setopt(context->curl, CURLOPT_POSTFIELDS, NULL);
+    curl_easy_setopt(context->curl, CURLOPT_POST, 0);
+}
 
-        puts("\n----------------------- USER SETTINGS  ----------------------");
-        curl_easy_setopt(context->curl, CURLOPT_URL, DEFAULT_SERVER "/api/manage/v1/UserSettings");
+static void show_information(command_context_t * context)
+{
+    CURLcode res;
+    puts("----------------------- SERVER CONFIGURATION ----------------------");
 
-        res = curl_easy_perform(context->curl);
-        /* Check for errors */
-        if (res != CURLE_OK)
-            fprintf(stderr, "curl_easy_perform() failed: %s\n",
-                curl_easy_strerror(res));
+    curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, stdout);
+    curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, NULL);
 
-        show_context(context);
-    }
+    curl_easy_setopt(context->curl, CURLOPT_URL, DEFAULT_SERVER "/api/v1/Configuration");
 
-    static uint parse_working_directory_json(char *in, uint size, uint nmemb, char *out)
-    {
-        uint r = size * nmemb;
+    res = curl_easy_perform(context->curl);
+    /* Check for errors */
+    if (res != CURLE_OK)
+        fprintf(stderr, "curl_easy_perform() failed: %s\n",
+            curl_easy_strerror(res));
+
+    puts("\n----------------------- SHOW PROFILE ----------------------");
+    curl_easy_setopt(context->curl, CURLOPT_URL, DEFAULT_SERVER "/api/manage/v1/UserProfile");
+
+    res = curl_easy_perform(context->curl);
+    /* Check for errors */
+    if (res != CURLE_OK)
+        fprintf(stderr, "curl_easy_perform() failed: %s\n",
+            curl_easy_strerror(res));
+
+    puts("\n----------------------- USER SETTINGS  ----------------------");
+    curl_easy_setopt(context->curl, CURLOPT_URL, DEFAULT_SERVER "/api/manage/v1/UserSettings");
+
+    res = curl_easy_perform(context->curl);
+    /* Check for errors */
+    if (res != CURLE_OK)
+        fprintf(stderr, "curl_easy_perform() failed: %s\n",
+            curl_easy_strerror(res));
+
+    show_context(context);
+}
+
+static uint parse_working_directory_json(char *in, uint size, uint nmemb, char *out)
+{
+    uint r = size * nmemb;
 #if PAYLOAD_DEBUG
-        FILE * fp = fopen("pwd.json", "w");
-        fwrite(in, size, nmemb, fp);
-        fclose(fp);
+    FILE * fp = fopen("pwd.json", "w");
+    fwrite(in, size, nmemb, fp);
+    fclose(fp);
 #endif
-        draw_json_Breadcrumbs(in, r);
-        return r;
-    }
+    draw_json_Breadcrumbs(in, r);
+    return r;
+}
 
-    static void show_working_dicrectory_path(command_context_t * context)
-    {
-        CURLcode res;
-        char request[512];
+static void show_working_dicrectory_path(command_context_t * context)
+{
+    CURLcode res;
+    char request[512];
 
-        snprintf(request, sizeof(request), "%s/api/rp/v1/%s/Folder/%s/Breadcrumbs",
-            DEFAULT_SERVER,
-            GetDomainMode(context),
-            GetCurrentFolder(context));
+    snprintf(request, sizeof(request), "%s/api/rp/v1/%s/Folder/%s/Breadcrumbs",
+        DEFAULT_SERVER,
+        GetDomainMode(context),
+        GetCurrentFolder(context));
 
-        curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, stdout);
-        curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, parse_working_directory_json);
-        curl_easy_setopt(context->curl, CURLOPT_URL, request);
-        res = curl_easy_perform(context->curl);
-        if (res != CURLE_OK)
-            fprintf(stderr, "curl_easy_perform() failed: %s\n",
-                curl_easy_strerror(res));
-        curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, NULL);
-    }
+    curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, stdout);
+    curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, parse_working_directory_json);
+    curl_easy_setopt(context->curl, CURLOPT_URL, request);
+    res = curl_easy_perform(context->curl);
+    if (res != CURLE_OK)
+        fprintf(stderr, "curl_easy_perform() failed: %s\n",
+            curl_easy_strerror(res));
+    curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, NULL);
+}
 
-    static void change_directory(command_context_t * context)
+static void change_directory(command_context_t * context)
+{
+    if (context->words_count == 0)
     {
-        if (context->words_count == 0)
-        {
-            printf("Current dir changed to %s root folder.\n", GetDomainMode(context));
-            strcpy(GetCurrentFolder(context), GetRootFolder(context));
-            return;
-        }
-        if (strlen(context->words[0]) != strlen("606335ef377eaa000171a5ba"))
-        {
-            puts("This version supports UUID only as argument. Or no argument to change current folder to session_namespace's root");
-            return;
-        }
-        strcpy(GetCurrentFolder(context), context->words[0]);
-        printf("Directory changed to: %s", GetCurrentFolder(context));
+        printf("Current dir changed to %s root folder.\n", GetDomainMode(context));
+        strcpy(GetCurrentFolder(context), GetRootFolder(context));
+        return;
     }
+    if (strlen(context->words[0]) != strlen("606335ef377eaa000171a5ba"))
+    {
+        puts("This version supports UUID only as argument. Or no argument to change current folder to session_namespace's root");
+        return;
+    }
+    strcpy(GetCurrentFolder(context), context->words[0]);
+    printf("Directory changed to: %s", GetCurrentFolder(context));
+}
 
-    static void logout_cloud(command_context_t * context)
+static void logout_cloud(command_context_t * context)
+{
+    stop = 1;
+}
+static void local_dir_list(command_context_t * context)
+{
+    system("ls -l");
+}
+static void switch_verbosity(command_context_t * context)
+{
+    verbose = verbose ? 0 : 1;
+    curl_easy_setopt(context->curl, CURLOPT_VERBOSE, verbose);
+    printf("curl verbose mode set to %s", verbose ? "Enabled" : "Disabled");
+}
+static void list_screen_limit(command_context_t * context)
+{
+    int value;
+    switch (context->words_count)
     {
-        stop = 1;
+    case 0:
+        printf("Limit set to %d direcory items", context->take_count);
+        break;
+    case 1:
+        if ((sscanf(context->words[0], "%d", &value) != 1) || value < 5 || value > 120)
+            fprintf(stderr, "Limit value %d out of range 5..120", value);
+        else
+            context->take_count = value;
+        break;
+    default:
+        fprintf(stderr, "Command 'limit' supports one or zero arguments\n");
+        break;
     }
-    static void local_dir_list(command_context_t * context)
-    {
-        system("ls -l");
-    }
-    static void switch_verbosity(command_context_t * context)
-    {
-        verbose = verbose ? 0 : 1;
-        curl_easy_setopt(context->curl, CURLOPT_VERBOSE, verbose);
-        printf("curl verbose mode set to %s", verbose ? "Enabled" : "Disabled");
-    }
-    static void list_screen_limit(command_context_t * context)
-    {
-        int value;
-        switch (context->words_count)
-        {
-        case 0:
-            printf("Limit set to %d direcory items", context->take_count);
-            break;
-        case 1:
-            if ((sscanf(context->words[0], "%d", &value) != 1) || value < 5 || value > 120)
-                fprintf(stderr, "Limit value %d out of range 5..120", value);
-            else
-                context->take_count = value;
-            break;
-        default:
-            fprintf(stderr, "Command 'limit' supports one or zero arguments\n");
-            break;
-        }
-    }
+}
 
-    static void select_namespace(command_context_t * context);
-    static void help(command_context_t * context);
+static void select_namespace(command_context_t * context);
+static void help(command_context_t * context);
 
 #include "help_rus.h"
 
-    command_record_t    commands[] = {
-        {"help",    help, "shows list of supported commands or command description", HELP_HELP},
-        {"template", select_namespace, "switch to templates namespace, can be used as prefix", HELP_NAMESPSACES},
-        {"report", select_namespace, "switch to reports namespace, can be used as prefix", HELP_NAMESPSACES},
-        {"export", select_namespace, "switch to exports namespace, can be used as prefix", HELP_NAMESPSACES},
-        {"ls",      show_directory, "show directory context", HELP_LS},
-        {"use",     use_object, "set active template, report, or document by it's UUID ", HELP_USE},
-        {"file",    select_object, "set active template, report, or document by it's human readble name ", NULL},
-        {"prepare", prepare_report, "prepare report by it's UUID", NULL},
-        {"search",  show_directory, "show directory context by mask", NULL},
-        {"cd",      change_directory, "change current directory by it's UUID", NULL},
-        {"get",     download_file, "download template, report or document by it's UUID", NULL},
-        {"put",     upload_file, "upload template, report or document to cloud", NULL},
-        {"pwd",     show_working_dicrectory_path, "print working directory path", NULL},
-        {"lls",     local_dir_list, "list of files local directory", NULL},
-        {"rm",      delete_remote_object, "delete file by it's UUID", NULL},
-        {"mkdir",   create_folder, "creaate folder", NULL},
-        {"rmdir",   delete_remote_object, "delete non-empty folder by it's UUID", NULL },
-        {"verbose", switch_verbosity, "toggle curl verbose mode ON/OFF", NULL},
-        {"limit",   list_screen_limit, "show/set max count of items of 'ls' and 'search' commands", NULL},
-        {"info",    show_information, "show various info.", HELP_INFO},
-        {"exit",    logout_cloud, "exit from FastReport.Cloud console. See help", HELP_EXIT},
-        {NULL, NULL, NULL, NULL}
-    };
+command_record_t    commands[] = {
+    {"help",    help, "shows list of supported commands or command description", HELP_HELP},
+    {"template", select_namespace, "switch to templates namespace, can be used as prefix", HELP_NAMESPSACES},
+    {"report", select_namespace, "switch to reports namespace, can be used as prefix", HELP_NAMESPSACES},
+    {"export", select_namespace, "switch to exports namespace, can be used as prefix", HELP_NAMESPSACES},
+    {"ls",      show_directory, "show directory context", HELP_LS},
+    {"use",     use_object, "set active template, report, or document by it's UUID ", HELP_USE},
+    {"file",    select_object, "set active template, report, or document by it's human readble name ", NULL},
+    {"prepare", prepare_report, "prepare report by it's UUID", NULL},
+    {"search",  show_directory, "show directory context by mask", NULL},
+    {"cd",      change_directory, "change current directory by it's UUID", NULL},
+    {"get",     download_file, "download template, report or document by it's UUID", NULL},
+    {"put",     upload_file, "upload template, report or document to cloud", NULL},
+    {"pwd",     show_working_dicrectory_path, "print working directory path", NULL},
+    {"lls",     local_dir_list, "list of files local directory", NULL},
+    {"rm",      delete_remote_object, "delete file by it's UUID", NULL},
+    {"mkdir",   create_folder, "creaate folder", NULL},
+    {"rmdir",   delete_remote_object, "delete non-empty folder by it's UUID", NULL },
+    {"verbose", switch_verbosity, "toggle curl verbose mode ON/OFF", NULL},
+    {"limit",   list_screen_limit, "show/set max count of items of 'ls' and 'search' commands", NULL},
+    {"info",    show_information, "show various info.", HELP_INFO},
+    {"exit",    logout_cloud, "exit from FastReport.Cloud console. See help", HELP_EXIT},
+    {NULL, NULL, NULL, NULL}
+};
 
-    static void help(command_context_t * context)
-    {
-        command_record_t   * ptr = commands;
-        if (context->words_count == 1) {
-            while (ptr->command_name != NULL) {
-                if (strcmp(ptr->command_name, context->words[0]) != 0) {
-                    ptr++;
-                    continue;
-                }
-                if (ptr->long_help)
-                    puts(ptr->long_help);
-                else
-                    printf("Help not found.\n%s - %s", ptr->command_name, ptr->short_help);
-                break;
-            }
-        }
-        else {
-            printf("List of supported commands:");
-            while (ptr->command_name != NULL) {
-
-                printf("\n\x1B[33m\x1B[1m %-10s\x1B[0m    %s", ptr->command_name, ptr->short_help);
+static void help(command_context_t * context)
+{
+    command_record_t   * ptr = commands;
+    if (context->words_count == 1) {
+        while (ptr->command_name != NULL) {
+            if (strcmp(ptr->command_name, context->words[0]) != 0) {
                 ptr++;
+                continue;
             }
+            if (ptr->long_help)
+                puts(ptr->long_help);
+            else
+                printf("Help not found.\n%s - %s", ptr->command_name, ptr->short_help);
+            break;
         }
     }
+    else {
+        printf("List of supported commands:");
+        while (ptr->command_name != NULL) {
 
-    static void next_command(command_context_t * context, char * command)
+            printf("\n\x1B[33m\x1B[1m %-10s\x1B[0m    %s", ptr->command_name, ptr->short_help);
+            ptr++;
+        }
+    }
+}
+
+static void next_command(command_context_t * context, char * command)
+{
+    command_record_t    *   cmd_ptr;
+    context->command = command;
+    char * ptr = strpbrk(command, " \t");
+    if (ptr != NULL) {
+        *ptr++ = 0;
+        while (isspace(*ptr))
+            ptr++;
+        if (*ptr != 0) {
+            context->words[0] = ptr;
+        }
+    }
+    else {
+        context->words[0] = 0;
+        context->words_count = 0;
+    }
+    for (cmd_ptr = commands; cmd_ptr->command_name != NULL; cmd_ptr++)
     {
-        command_record_t    *   cmd_ptr;
-        context->command = command;
-        char * ptr = strpbrk(command, " \t");
+        if (strcmp(context->command, cmd_ptr->command_name) != 0)
+            continue;
+        cmd_ptr->run(context);
+        break;
+    }
+}
+
+static char * parse_filename(command_context_t * context, char * input, int enclose)
+{
+    char *result = input;
+    int prefix = 0;
+    if (*input == '"') {
+        int length = 0;
+        if (enclose) {
+            *input = '\'';
+            result = input;
+            input++;
+        }
+        else {
+            input++;
+            result = input;
+        }
+        while (*input) {
+            switch (*input) {
+            case '"':
+                if (prefix == 0) {
+                    *input++ = enclose ? '\'' : 0;
+                    if (*input == 0) {
+                        context->words_count = 0;
+                        context->words[0] = NULL;
+                        break;
+                    }
+                    while (isspace(*input))
+                        input++;
+                    if (*input == 0)
+                        break;
+                    context->words_count = 1;
+                    context->words[0] = input;
+                    return result;
+                }
+                prefix = 0;
+                break;
+            case '\\':
+                prefix = 1;
+            default:
+                prefix = 0;
+            }
+            input++;
+            continue;
+        }
+    }
+    else {
+        while (*input && !isspace(*input)) {
+            input++;
+        }
+        if (*input == 0) {
+            context->words_count = 0;
+            context->words[0] = NULL;
+        }
+        else {
+            context->words_count = 1;
+            while (*input && isspace(*input)) {
+                *input++ = 0;
+            }
+            context->words[0] = input;
+        }
+    }
+    return result;
+}
+
+static char * parse_uuid(command_context_t * context, char * input)
+{
+    int counter;
+    char * ptr = input;
+    for (counter = ID_SIZE; *ptr && counter; --counter, ++ptr) {
+        if (isdigit(*ptr) || (*ptr >= 'a' && *ptr <= 'f'))
+            continue;
+        fprintf(stderr, "Counter %d %s\n", counter, input);
+        return NULL;
+    }
+    while (*ptr != '\0' && isspace(*ptr))
+        *ptr++ = '\0';
+    if (*ptr != 0) {
+        context->words[0] = ptr;
+        context->words_count = 1;
+    }
+    else {
+        context->words[0] = NULL;
+        context->words_count = 0;
+    }
+    return input;
+}
+
+static void select_namespace(command_context_t * context)
+{
+    command_record_t    *   cmd_ptr;
+
+    if (strcmp(context->command, "template") == 0)
+        context->session_namespace = Templates;
+    else if (strcmp(context->command, "report") == 0)
+        context->session_namespace = Reports;
+    else if (strcmp(context->command, "export") == 0)
+        context->session_namespace = Exports;
+    else {
+        fprintf(stderr, "Namespace %s not defined\n", context->command);
+        return;
+    }
+
+    if (context->words_count == 1) {
+        next_command(context, context->words[0]);
+    }
+}
+
+static void user_interface(command_context_t * context)
+{
+    command_record_t    *   cmd_ptr;
+    char                *   ptr;
+
+    puts("Welcome to \x1B[36m\x1B[1mFastReport.Cloud\x1B[0m shell. Type 'help' to see list of builtin commands.");
+    stop = 0;
+    context->take_count = 16;
+    do {
+        context->words_count = 0;
+        context->command = readline_gets(modes[context->session_namespace]);
+        if (context->command == NULL) {
+            stop = 1;
+            puts("");
+            continue;
+        }
+        ptr = strpbrk(context->command, " \t");
         if (ptr != NULL) {
             *ptr++ = 0;
             while (isspace(*ptr))
                 ptr++;
             if (*ptr != 0) {
-                context->words[0] = ptr;
+                context->words[context->words_count] = ptr;
+                context->words_count++;
             }
         }
-        else {
-            context->words[0] = 0;
-            context->words_count = 0;
-        }
+        if (context->command[0] == 0)
+            continue;
+
         for (cmd_ptr = commands; cmd_ptr->command_name != NULL; cmd_ptr++)
         {
             if (strcmp(context->command, cmd_ptr->command_name) != 0)
@@ -1021,244 +1189,107 @@ static void use_object(command_context_t * context)
             cmd_ptr->run(context);
             break;
         }
+        if (cmd_ptr->command_name != NULL)
+            continue;
+        printf("Unknown command: '%s' Type 'help' and press <Enter> to see list of built-in commands", context->command);
+    } while (!stop);
+}
+
+uint init_cb(char *in, uint size, uint nmemb, char *out)
+{
+    uint r = size * nmemb;
+    char * end = NULL;
+    command_context_t * context = (command_context_t*)out;
+    char * ptr = strstr(in, "\"id\":\"");  // "id":"
+
+    if (ptr == NULL) {
+        fprintf(stderr, "Siggnature not found");
+    }
+    else {
+        ptr += 6;
+        end = strchr(ptr, '"');
+        if (!end) {
+            fprintf(stderr, "Signature not terminated");
+        }
     }
 
-    static char * parse_filename(command_context_t * context, char * input)
+    if (!ptr || !end || (end - ptr != 24)) {
+        fprintf(stderr, "Unable connect to cloud server: signature error\n");
+        exit(-50);
+    }
+    *end = 0;
+    switch (context->session_namespace)
     {
-        char *result = input;
-        int prefix = 0;
-        if (*input == '"') {
-            int length = 0;
-            input++;
-            result = input;
-            while (*input) {
-                switch (*input) {
-                case '"':
-                    if (prefix == 0) {
-                        *input++ = 0;
-                        if (*input == 0) {
-                            context->words_count = 0;
-                            context->words[0] = NULL;
-                            break;
-                        }
-                        while (isspace(*input))
-                            input++;
-                        if (*input == 0)
-                            break;
-                        context->words_count = 1;
-                        context->words[0] = input;
-                        return result;
-                    }
-                    prefix = 0;
-                    break;
-                case '\\':
-                    prefix = 1;
-                default:
-                    prefix = 0;
-                }
-                input++;
-                continue;
-            }
-        }
-        else {
-            while (*input && !isspace(*input)) {
-                input++;
-            }
-            if (*input == 0) {
-                context->words_count = 0;
-                context->words[0] = NULL;
-            }
-            else {
-                context->words_count = 1;
-                while (*input && isspace(*input)) {
-                    *input++ = 0;
-                }
-                context->words[0] = input;
-            }
-        }
-        return result;
+    case Templates:
+        strcpy(context->templates_root_folder, ptr);
+        strcpy(context->templates_current_folder, ptr);
+        break;
+    case Reports:
+        strcpy(context->reports_root_folder, ptr);
+        strcpy(context->reports_current_folder, ptr);
+        break;
+    case Exports:
+        strcpy(context->exports_root_folder, ptr);
+        strcpy(context->exports_current_folder, ptr);
+        break;
     }
+    return r;
+}
 
-    static char * parse_uuid(command_context_t * context, char * input)
+void user_init(command_context_t * context, char * auth)
+{
+    CURLcode res;
+    int i;
+    const namespace_t dlist[3] = { Templates, Reports, Exports };
+    char request[512];
+
+    curl_easy_setopt(context->curl, CURLOPT_USERPWD, auth);
+    curl_easy_setopt(context->curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2_0);
+    curl_easy_setopt(context->curl, CURLOPT_USERAGENT, "FastReport.Cloud/0.3 (Linux) libcurl");
+    curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, stdout);
+    curl_easy_setopt(context->curl, CURLOPT_VERBOSE, verbose);
+    curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, init_cb);
+    curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, context);
+
+    for (i = 0; i < 3; i++)
     {
-        int counter;
-        char * ptr = input;
-        for (counter = ID_SIZE; *ptr && counter; --counter, ++ptr) {
-            if (isdigit(*ptr) || (*ptr >= 'a' && *ptr <= 'f'))
-                continue;
-            fprintf(stderr, "Counter %d %s\n", counter, input);
-            return NULL;
-        }
-        while (*ptr != '\0' && isspace(*ptr))
-            *ptr++ = '\0';
-        if (*ptr != 0) {
-            context->words[0] = ptr;
-            context->words_count = 1;
-        }
-        else {
-            context->words[0] = NULL;
-            context->words_count = 0;
-        }
-        return input;
+        context->session_namespace = dlist[i];
+
+        snprintf(request, sizeof(request), "%s/api/rp/v1/%s/Root",
+            DEFAULT_SERVER,
+            GetDomainMode(context));
+
+        curl_easy_setopt(context->curl, CURLOPT_URL, request);
+        res = curl_easy_perform(context->curl);
+        if (res != CURLE_OK)
+            fprintf(stderr, "curl_easy_perform() failed: %s\n",
+                curl_easy_strerror(res));
+    }
+    context->session_namespace = Templates;
+}
+
+int main(void)
+{
+    CURLcode                res;
+    command_context_t       context;
+    char                    auth[256];
+
+    memset(&context, 0, sizeof(command_context_t));
+
+    strcpy(auth, "apikey:");
+    if (load_token(KEY_FILE, auth) < 0) {
+        fprintf(stderr, "Unable set security token\n");
+        return EXIT_FAILURE;
     }
 
-    static void select_namespace(command_context_t * context)
-    {
-        command_record_t    *   cmd_ptr;
-
-        if (strcmp(context->command, "template") == 0)
-            context->session_namespace = Templates;
-        else if (strcmp(context->command, "report") == 0)
-            context->session_namespace = Reports;
-        else if (strcmp(context->command, "export") == 0)
-            context->session_namespace = Exports;
-        else {
-            fprintf(stderr, "Namespace %s not defined\n", context->command);
-            return;
-        }
-
-        if (context->words_count == 1) {
-            next_command(context, context->words[0]);
-        }
+    curl_global_init(CURL_GLOBAL_DEFAULT);
+    context.curl = curl_easy_init();
+    if (context.curl) {
+        user_init(&context, auth);
+        memset(auth, 0, sizeof(auth));
+        user_interface(&context);
+        curl_easy_cleanup(context.curl);
     }
-
-    static void user_interface(command_context_t * context)
-    {
-        command_record_t    *   cmd_ptr;
-        char                *   ptr;
-
-        puts("Welcome to \x1B[36m\x1B[1mFastReport.Cloud\x1B[0m shell. Type 'help' to see list of builtin commands.");
-        stop = 0;
-        context->take_count = 16;
-        do {
-            context->words_count = 0;
-            context->command = readline_gets(modes[context->session_namespace]);
-            if (context->command == NULL) {
-                stop = 1;
-                puts("");
-                continue;
-            }
-            ptr = strpbrk(context->command, " \t");
-            if (ptr != NULL) {
-                *ptr++ = 0;
-                while (isspace(*ptr))
-                    ptr++;
-                if (*ptr != 0) {
-                    context->words[context->words_count] = ptr;
-                    context->words_count++;
-                }
-            }
-            if (context->command[0] == 0)
-                continue;
-
-            for (cmd_ptr = commands; cmd_ptr->command_name != NULL; cmd_ptr++)
-            {
-                if (strcmp(context->command, cmd_ptr->command_name) != 0)
-                    continue;
-                cmd_ptr->run(context);
-                break;
-            }
-            if (cmd_ptr->command_name != NULL)
-                continue;
-            printf("Unknown command: '%s' Type 'help' and press <Enter> to see list of built-in commands", context->command);
-        } while (!stop);
-    }
-
-    uint init_cb(char *in, uint size, uint nmemb, char *out)
-    {
-        uint r = size * nmemb;
-        char * end = NULL;
-        command_context_t * context = (command_context_t*)out;
-        char * ptr = strstr(in, "\"id\":\"");  // "id":"
-
-        if (ptr == NULL) {
-            fprintf(stderr, "Siggnature not found");
-        }
-        else {
-            ptr += 6;
-            end = strchr(ptr, '"');
-            if (!end) {
-                fprintf(stderr, "Signature not terminated");
-            }
-        }
-
-        if (!ptr || !end || (end - ptr != 24)) {
-            fprintf(stderr, "Unable connect to cloud server: signature error\n");
-            exit(-50);
-        }
-        *end = 0;
-        switch (context->session_namespace)
-        {
-        case Templates:
-            strcpy(context->templates_root_folder, ptr);
-            strcpy(context->templates_current_folder, ptr);
-            break;
-        case Reports:
-            strcpy(context->reports_root_folder, ptr);
-            strcpy(context->reports_current_folder, ptr);
-            break;
-        case Exports:
-            strcpy(context->exports_root_folder, ptr);
-            strcpy(context->exports_current_folder, ptr);
-            break;
-        }
-        return r;
-    }
-
-    void user_init(command_context_t * context, char * auth)
-    {
-        CURLcode res;
-        int i;
-        const namespace_t dlist[3] = { Templates, Reports, Exports };
-        char request[512];
-
-        curl_easy_setopt(context->curl, CURLOPT_USERPWD, auth);
-        curl_easy_setopt(context->curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2_0);
-        curl_easy_setopt(context->curl, CURLOPT_USERAGENT, "FastReport.Cloud/0.3 (Linux) libcurl");
-        curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, stdout);
-        curl_easy_setopt(context->curl, CURLOPT_VERBOSE, verbose);
-        curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, init_cb);
-        curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, context);
-
-        for (i = 0; i < 3; i++)
-        {
-            context->session_namespace = dlist[i];
-
-            snprintf(request, sizeof(request), "%s/api/rp/v1/%s/Root",
-                DEFAULT_SERVER,
-                GetDomainMode(context));
-
-            curl_easy_setopt(context->curl, CURLOPT_URL, request);
-            res = curl_easy_perform(context->curl);
-            if (res != CURLE_OK)
-                fprintf(stderr, "curl_easy_perform() failed: %s\n",
-                    curl_easy_strerror(res));
-        }
-        context->session_namespace = Templates;
-    }
-
-    int main(void)
-    {
-        CURLcode                res;
-        command_context_t       context;
-        char                    auth[256];
-
-        memset(&context, 0, sizeof(command_context_t));
-
-        strcpy(auth, "apikey:");
-        if (load_token(KEY_FILE, auth) < 0) {
-            fprintf(stderr, "Unable set security token\n");
-            return EXIT_FAILURE;
-        }
-
-        curl_global_init(CURL_GLOBAL_DEFAULT);
-        context.curl = curl_easy_init();
-        if (context.curl) {
-            user_init(&context, auth);
-            memset(auth, 0, sizeof(auth));
-            user_interface(&context);
-            curl_easy_cleanup(context.curl);
-        }
-        curl_global_cleanup();
-        return 0;
-    }
+    curl_global_cleanup();
+    return 0;
+}
