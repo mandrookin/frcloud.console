@@ -174,7 +174,7 @@ size_t dnld_header_parse(void *hdr, size_t size, size_t nmemb, void *userdata)
     curl_easy_getinfo(dnld_params->curl, CURLINFO_RESPONSE_CODE, &http_code);
     if (http_code != 200)
     {
-        fprintf(stderr, "Request error code: %d\n", http_code);
+        fprintf(stderr, "HTTP response error code: %d\n", http_code);
         return -1;
     }
 
@@ -406,7 +406,7 @@ static void select_object(command_context_t * context)
         GetCurrentFolder(context),
         encoded_filename);
 
-    printf("SELECT: %s\n", request);
+//    printf("SELECT: %s\n", request);
 
     json_request(context, request);
 
@@ -524,15 +524,13 @@ static void prepare_report(command_context_t * context)
         name_holder,
         context->reports_current_folder);
 
-    curl_easy_setopt(context->curl, CURLOPT_POSTFIELDS, post);
-
-    curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, write_json_chunk);
-
     context->received_json_size = 0;
     context->json_chunks_head = NULL;
     context->json_chunks_tail = NULL;
 
+    curl_easy_setopt(context->curl, CURLOPT_POSTFIELDS, post);
     curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, context);
+    curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, write_json_chunk);
 
     res = curl_easy_perform(context->curl);
     if (res != CURLE_OK)
@@ -675,10 +673,10 @@ static void download_file(command_context_t * context)
     headers = curl_slist_append(headers, "Accept: text/html, application/xhtml+xml, application/xml, application/octet-stream");
     curl_easy_setopt(context->curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(context->curl, CURLOPT_HEADERFUNCTION, dnld_header_parse);
-    curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, stdout);
-    curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, write_cb);
     dnld_params.curl = context->curl;
     curl_easy_setopt(context->curl, CURLOPT_HEADERDATA, &dnld_params);
+    curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, context);
+    curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, write_cb);
     curl_easy_setopt(context->curl, CURLOPT_URL, request);
 
     file_body = -1;
@@ -700,6 +698,7 @@ static void download_file(command_context_t * context)
     curl_easy_setopt(context->curl, CURLOPT_HTTPHEADER, NULL);
     curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, NULL);
     curl_easy_setopt(context->curl, CURLOPT_HEADERFUNCTION, NULL);
+    curl_easy_setopt(context->curl, CURLOPT_HEADERDATA, verbose ? stdout : NULL);
 }
 
 static void upload_file(command_context_t * context)
@@ -795,15 +794,13 @@ static void upload_file(command_context_t * context)
 size_t rm_header_parse(void *hdr, size_t size, size_t nmemb, void *userdata)
 {
     const   size_t  cb = size * nmemb;
-    const   char    *hdr_str = hdr;
     dnld_params_t *dnld_params = (dnld_params_t*)userdata;
-    char const*const cdtag = "Content-disposition:";
-
     int http_code;
+
     curl_easy_getinfo(dnld_params->curl, CURLINFO_RESPONSE_CODE, &http_code);
     if (http_code != 204)
     {
-        fprintf(stderr, "Request error code: %d\n", http_code);
+        fprintf(stderr, "HTTP response error code: %d\n", http_code);
         return -1;
     }
     return cb;
@@ -841,15 +838,19 @@ static void delete_remote_object(command_context_t * context)
         object_type,
         uuid);
 
+    dnld_params.curl = context->curl;
+    curl_easy_setopt(context->curl, CURLOPT_HEADERDATA, &dnld_params);
     curl_easy_setopt(context->curl, CURLOPT_HEADERFUNCTION, rm_header_parse);
-    curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, stdout);
     curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, NULL);
+    curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, stdout);
     curl_easy_setopt(context->curl, CURLOPT_CUSTOMREQUEST, "DELETE");
     curl_easy_setopt(context->curl, CURLOPT_URL, request);
 
     res = curl_easy_perform(context->curl);
 
     curl_easy_setopt(context->curl, CURLOPT_CUSTOMREQUEST, NULL);
+    curl_easy_setopt(context->curl, CURLOPT_HEADERFUNCTION, NULL);
+    curl_easy_setopt(context->curl, CURLOPT_HEADERDATA, verbose ? stdout : NULL);
 
     /* Check for errors */
     if (res != CURLE_OK)
@@ -865,6 +866,7 @@ static void create_folder(command_context_t * context)
 {
 #define CREATE_BUFF_SIZE 4096
     CURLcode res;
+    char * filename;
     char request[512];
 
     if (context->words_count != 1) {
@@ -872,7 +874,8 @@ static void create_folder(command_context_t * context)
         return;
     }
 
-    char * filename = context->words[0];
+    filename = parse_filename(context, context->words[0], 0);
+
     snprintf(request, sizeof(request), "%s/api/rp/v1/%s/Folder/%s/Folder",
         DEFAULT_SERVER,
         GetDomainMode(context),
@@ -890,7 +893,7 @@ static void create_folder(command_context_t * context)
     curl_easy_setopt(context->curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(context->curl, CURLOPT_URL, request);
     curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, stdout);
-    //////////curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, context);
+    curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, NULL);
 
     res = curl_easy_perform(context->curl);
     if (res != CURLE_OK)
@@ -960,7 +963,7 @@ static void show_working_dicrectory_path(command_context_t * context)
         GetDomainMode(context),
         GetCurrentFolder(context));
 
-    curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, stdout);
+    curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, context);
     curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, parse_working_directory_json);
     curl_easy_setopt(context->curl, CURLOPT_URL, request);
     res = curl_easy_perform(context->curl);
@@ -1302,7 +1305,6 @@ void user_init(command_context_t * context, char * auth)
     curl_easy_setopt(context->curl, CURLOPT_USERPWD, auth);
     curl_easy_setopt(context->curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2_0);
     curl_easy_setopt(context->curl, CURLOPT_USERAGENT, "FastReport.Cloud/0.3 (Linux) libcurl");
-    curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, stdout);
     curl_easy_setopt(context->curl, CURLOPT_VERBOSE, verbose);
     curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, init_cb);
     curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, context);
