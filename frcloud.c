@@ -1001,27 +1001,27 @@ static void help(command_context_t * context);
 #include "help_rus.h"
 
 command_record_t    commands[] = {
-    {"help",    help, "shows list of supported commands or command description", HELP_HELP},
-    {"template", select_namespace, "switch to templates namespace, can be used as prefix", HELP_NAMESPSACES},
-    {"report", select_namespace, "switch to reports namespace, can be used as prefix", HELP_NAMESPSACES},
-    {"export", select_namespace, "switch to exports namespace, can be used as prefix", HELP_NAMESPSACES},
-    {"ls",      show_directory, "show directory context", HELP_LS},
+    {"help",    help, "show list of supported commands or command description", HELP_HELP},
+    {"template", select_namespace, "switch to templates namespace, can be used as a prefix", HELP_NAMESPSACES},
+    {"report", select_namespace, "switch to reports namespace, can be used as a prefix", HELP_NAMESPSACES},
+    {"export", select_namespace, "switch to exports namespace, can be used as a prefix", HELP_NAMESPSACES},
+    {"ls",      show_directory, "show content of a folder within active namespace", HELP_LS},
     {"use",     use_object, "set active template, report, or document by it's UUID ", HELP_USE},
-    {"file",    select_object, "set active template, report, or document by it's human readble name ", NULL},
+    {"file",    select_object, "set active template, report, or document by it's human readble name", NULL},
     {"prepare", prepare_report, "prepare report by it's UUID", NULL},
     {"search",  show_directory, "show directory context by mask", NULL},
     {"cd",      change_directory, "change current directory by it's UUID", NULL},
     {"get",     download_file, "download template, report or document by it's UUID", NULL},
     {"put",     upload_file, "upload template, report or document to cloud", NULL},
     {"pwd",     show_working_dicrectory_path, "print working directory path", NULL},
-    {"lls",     local_dir_list, "list of files local directory", NULL},
+    {"lls",     local_dir_list, "list of files in local directory", NULL},
     {"rm",      delete_remote_object, "delete file by it's UUID", NULL},
-    {"mkdir",   create_folder, "creaate folder", NULL},
+    {"mkdir",   create_folder, "creaate new folder", NULL},
     {"rmdir",   delete_remote_object, "delete non-empty folder by it's UUID", NULL },
     {"verbose", switch_verbosity, "toggle curl verbose mode ON/OFF", NULL},
     {"limit",   list_screen_limit, "show/set max count of items of 'ls' and 'search' commands", NULL},
-    {"info",    show_information, "show various info.", HELP_INFO},
-    {"exit",    logout_cloud, "exit from FastReport.Cloud console. See help", HELP_EXIT},
+    {"info",    show_information, "show various information", HELP_INFO},
+    {"exit",    logout_cloud, "exit from FastReport.Cloud console", HELP_EXIT},
     {NULL, NULL, NULL, NULL}
 };
 
