@@ -189,7 +189,6 @@ size_t dnld_header_parse(void *hdr, size_t size, size_t nmemb, void *userdata)
     }
 
     if (!strncasecmp(hdr_str, cdtag, strlen(cdtag))) {
-        printf("Found c-d: %s\n", hdr_str);
         int ret = get_oname_from_cd(hdr_str + strlen(cdtag), dnld_params->remote_fname);
         if (ret) {
             fprintf(stderr, "ERR: bad remote name");
@@ -219,9 +218,10 @@ char * readline_gets(const char * prompt)
         while (isspace(*line_ptr))
             line_ptr++;
         if (*line_ptr) {
-            int res = history_search_pos(line_ptr, 1, 0);
-            if(res < 0)
-                add_history(line_ptr);
+            int res;
+            while ((res = history_search_pos(line_ptr, 1, 0)) >= 0)
+                remove_history(res);
+            add_history(line_ptr);
         }
     }
 
