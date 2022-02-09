@@ -11,7 +11,7 @@
 #define ID_SIZE 24
 
 // Undefine this to disable storing history to file
-#define HISTORY_FILE    ".frcloud.hostory"
+#define HISTORY_FILE    ".frcloud.history"
 
 typedef unsigned long uint64_t;
 
@@ -35,6 +35,7 @@ typedef struct {
     object_type_t   type;
     char           *name;
     char            uuid[ID_BUFF_SIZE];
+    char            template[ID_BUFF_SIZE];
     char            parent[ID_BUFF_SIZE];
     char            subscription[ID_BUFF_SIZE];
     uint            size;

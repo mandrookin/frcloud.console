@@ -354,7 +354,7 @@ int json_FileInfo(char *js, size_t jslen, command_context_t * context)
     //    printf("+++ %s\n", js);
 
     if (context->last_object.name != NULL) {
-        printf("Release name: %s\n", context->last_object.name);
+        /// printf("Release name: %s\n", context->last_object.name);
         free(0);
     }
     memset(&context->last_object, 0, sizeof(context->last_object));
@@ -382,8 +382,7 @@ int json_FileInfo(char *js, size_t jslen, command_context_t * context)
         }
         if (json_text_compare(js, t, "templateId")) {
             t++;
-            get_string(js, t++, tmp_buff, sizeof(tmp_buff));
-            fprintf(stderr, "TODO: parse teplateId %s\n", tmp_buff);
+            get_string(js, t++, context->last_object.template, sizeof(context->last_object.template));
         }
         if (json_text_compare(js, t, "reportId")) {
             t++;
@@ -393,7 +392,9 @@ int json_FileInfo(char *js, size_t jslen, command_context_t * context)
         if (json_text_compare(js, t, "reportInfo")) {
             t++;
             get_string(js, t, tmp_buff, sizeof(tmp_buff));
+#if REPORT_INFO
             fprintf(stderr, "TODO: parse reportInfo %s\n", tmp_buff);
+#endif
             t += (t->size << 1) + 1;
         }
 

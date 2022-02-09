@@ -314,33 +314,29 @@ static void show_context(command_context_t * context)
         "File" : context->last_object.type == Folder ? "Folder" : "Unknown");
     printf("Name: %s\n", context->last_object.name);
     printf("Cloud size %d\n", context->last_object.size);
-    printf("Parent: %s\n", context->last_object.parent);
-    printf("Subscription: %s\n", context->last_object.subscription);
-    printf("Status: %s\n", context->last_object.status);
-    printf("Reason: %s\n", context->last_object.reason);
-    printf("Created: %s\n", context->last_object.edited);
-    printf("Creator: %s\n", context->last_object.creator);
-    printf("Edited: %s\n", context->last_object.edited);
-    printf("Editor: %s\n", context->last_object.editor);
+    if (context->last_object.parent[0])
+        printf("Parent: %s\n", context->last_object.parent);
+    if (context->last_object.subscription[0])
+        printf("Subscription: %s\n", context->last_object.subscription);
+    if (context->last_object.status[0])
+        printf("Status: %s\n", context->last_object.status);
+    if (context->last_object.reason[0])
+        printf("Reason: %s\n", context->last_object.reason);
+    if (context->last_object.created[0])
+        printf("Created: %s\n", context->last_object.created);
+    if (context->last_object.creator[0])
+        printf("Creator: %s\n", context->last_object.creator);
+    if (context->last_object.edited[0])
+        printf("Edited: %s\n", context->last_object.edited);
+    if(context->last_object.editor[0])
+        printf("Editor: %s\n", context->last_object.editor);
 }
 
-static void use_object(command_context_t * context)
+static int get_file_info(command_context_t * context, char * uuid)
 {
     CURLcode res;
-    char * uuid;
     int status;
     char request[512];
-
-    if (context->words_count == 0) {
-        show_context(context);
-        return;
-    }
-
-    uuid = parse_uuid(context, context->words[0]);
-    if (uuid == NULL) {
-        fprintf(stderr, "argument of 'use' command is not ID:%s\n", context->words[0]);
-        return;
-    }
 
     snprintf(request, sizeof(request), "%s/api/rp/v1/%s/File/%s",
         DEFAULT_SERVER,
@@ -352,14 +348,14 @@ static void use_object(command_context_t * context)
     json_request(context, request);
 
     do {
-        int status = context->received_json_size;
+        status = context->received_json_size;
         if (status < 0) {
             fprintf(stderr, "Unable receive properties of %s\n", uuid);
             break;
         }
         char * json_stream = alloca(context->received_json_size);
         json_response(context, json_stream);
-#if DEBUG_DIRECTORY_JSON
+#if DEBUG_FILEINFO_JSON
         json_stream[context->received_json_size] = 0;
         puts(json_stream);
 #endif
@@ -373,11 +369,29 @@ static void use_object(command_context_t * context)
             fprintf(stderr, "json_ReportInfo = %d\n", status);
             break;
         }
-        if (context->verbose)
-            show_context(context);
-        if (context->words_count == 1)
-            next_command(context, context->words[0]);
     } while (0);
+    return status;
+}
+
+static void use_object(command_context_t * context)
+{
+    char * uuid;
+
+    if (context->words_count == 0) {
+        show_context(context);
+        return;
+    }
+    uuid = parse_uuid(context, context->words[0]);
+    if (uuid == NULL) {
+        fprintf(stderr, "argument of 'use' command is not ID: %s\n", context->words[0]);
+        return;
+    }
+    if (get_file_info(context, uuid) < 0)
+        return;
+    if (context->verbose)
+        show_context(context);
+    if (context->words_count == 1)
+        next_command(context, context->words[0]);
 }
 
 static void select_object(command_context_t * context)
@@ -553,11 +567,21 @@ static void prepare_report(command_context_t * context)
         fprintf(stderr, "Uparsed server response detected on preapre report. Error code: %d\n", status);
         return;
     }
-#if _UNDER_CONSTRUCTION_
-    if (strcmp(context->last_object.status, "InQueue") == 0 ||
-        strcmp(context->last_object.status, "InQueue"))
-        ;
-#endif
+    if (context->verbose)
+        show_context(context);
+
+    namespace_t saved_space = context->session_namespace;
+    context->session_namespace = Reports;
+
+    while (strcmp(context->last_object.status, "InQueue") == 0 ||
+        strcmp(context->last_object.status, "InProcess") == 0) {
+        //if (context->verbose)
+            printf("Prepare status: %s\n", context->last_object.status);
+        sleep(1);
+        get_file_info(context, context->last_object.uuid);
+    }
+    context->session_namespace = saved_space;
+
     if (context->verbose)
         show_context(context);
     if (context->words_count == 1) {
@@ -827,9 +851,7 @@ static void delete_remote_object(command_context_t * context)
     char request[512];
 
     if (context->words_count == 1) 
-    {
         uuid = parse_uuid(context, context->words[0]);
-    }
 
     if (uuid == NULL) {
         puts("Use rm/rmdir 'uuid' to delete file/directory. Where 'uuid' is unique identifier of file");
@@ -1266,7 +1288,7 @@ static char * parse_uuid(command_context_t * context, char * input)
     for (counter = ID_SIZE; *ptr && counter; --counter, ++ptr) {
         if (isdigit(*ptr) || (*ptr >= 'a' && *ptr <= 'f'))
             continue;
-        fprintf(stderr, "Object ID format error %s\n", input);
+        // fprintf(stderr, "Object ID format error %s\n", input);
         return NULL;
     }
     while (*ptr != '\0' && isspace(*ptr))
