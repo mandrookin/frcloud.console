@@ -338,7 +338,7 @@ static void use_object(command_context_t * context)
 
     uuid = parse_uuid(context, context->words[0]);
     if (uuid == NULL) {
-        fprintf(stderr, "argument of 'use' command is not ID:\n", context->words[0]);
+        fprintf(stderr, "argument of 'use' command is not ID:%s\n", context->words[0]);
         return;
     }
 
@@ -647,12 +647,17 @@ static void download_file(command_context_t * context)
             puts("Active object is not available yet");
             return;
         }
-        // Take UUID from resuilt of previous command
-        printf("UUID: %s\n", context->last_object.uuid);
+        // Take ID from resuilt of previous command
+        printf("object ID: %s\n", context->last_object.uuid);
         uuid = context->last_object.uuid;
     }
-    else // requires switch session_namespace
-        uuid = context->words[0];
+    else {// requires switch session_namespace
+        uuid = parse_uuid(context, context->words[0]);
+        if (uuid == NULL) {
+            fprintf(stderr, "Argument is not an object ID : %s\n", context->last_object.uuid);
+            return;
+        }
+    }
 
     switch (context->session_namespace) {
     case Templates:
@@ -987,7 +992,7 @@ static void change_directory(command_context_t * context)
     }
     uuid = parse_uuid(context, context->words[0]);
     if (uuid == NULL) {
-        fprintf(stderr, "argument of 'cd' command is not ID:\n", context->words[0]);
+        fprintf(stderr, "argument of 'cd' command is not ID:%s\n", context->words[0]);
         return;
     }
 
@@ -1052,18 +1057,18 @@ command_record_t    commands[] = {
     {"report", select_namespace, "switch to reports namespace, can be used as a prefix", HELP_NAMESPSACES},
     {"export", select_namespace, "switch to exports namespace, can be used as a prefix", HELP_NAMESPSACES},
     {"ls",      show_directory, "show content of a folder within active namespace", HELP_LS},
-    {"use",     use_object, "set active template, report, or document by it's UUID ", HELP_USE},
+    {"use",     use_object, "set active template, report, or document by object ID ", HELP_USE},
     {"file",    select_object, "set active template, report, or document by it's human readble name", HELP_FILE},
-    {"prepare", prepare_report, "prepare report by it's UUID", NULL},
+    {"prepare", prepare_report, "prepare report by object ID", NULL},
     {"search",  show_directory, "show directory context by mask", NULL},
-    {"cd",      change_directory, "change current directory by it's UUID", NULL},
-    {"get",     download_file, "download template, report or document by it's UUID", NULL},
+    {"cd",      change_directory, "change current directory by object ID", NULL},
+    {"get",     download_file, "download template, report or document by object ID", NULL},
     {"put",     upload_file, "upload template, report or document to cloud", NULL},
     {"pwd",     show_working_dicrectory_path, "print working directory path", NULL},
     {"lls",     local_dir_list, "list of files in local directory", NULL},
-    {"rm",      delete_remote_object, "delete file by it's UUID", NULL},
+    {"rm",      delete_remote_object, "delete file by object ID", NULL},
     {"mkdir",   create_folder, "creaate new folder", NULL},
-    {"rmdir",   delete_remote_object, "delete non-empty folder by it's UUID", NULL },
+    {"rmdir",   delete_remote_object, "delete non-empty folder by object ID", NULL },
     {"verbose", switch_verbosity, "toggle curl verbose mode ON/OFF", NULL},
     {"limit",   list_screen_limit, "show/set max count of items of 'ls' and 'search' commands", NULL},
     {"info",    show_information, "show various information", HELP_INFO},
@@ -1322,7 +1327,7 @@ void user_init(command_context_t * context, char * auth)
 
     curl_easy_setopt(context->curl, CURLOPT_USERPWD, auth);
     curl_easy_setopt(context->curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2_0);
-    curl_easy_setopt(context->curl, CURLOPT_USERAGENT, "FastReport.Cloud/0.3 (Linux) libcurl");
+    curl_easy_setopt(context->curl, CURLOPT_USERAGENT, "FastReport.Cloud/0.4 (Linux) libcurl");
     curl_easy_setopt(context->curl, CURLOPT_VERBOSE, context->verbose);
     curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, init_cb);
     curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, context);
