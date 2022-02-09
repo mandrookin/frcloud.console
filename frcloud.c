@@ -548,7 +548,16 @@ static void prepare_report(command_context_t * context)
     char * json_stream = alloca(context->received_json_size + 1);
     json_response(context, json_stream);
     // printf("--- %s\n", json_stream);
-    json_FileInfo(json_stream, context->received_json_size, context);
+    int status = json_FileInfo(json_stream, context->received_json_size, context);
+    if ( status != 0) {
+        fprintf(stderr, "Uparsed server response detected on preapre report. Error code: %d\n", status);
+        return;
+    }
+#if _UNDER_CONSTRUCTION_
+    if (strcmp(context->last_object.status, "InQueue") == 0 ||
+        strcmp(context->last_object.status, "InQueue"))
+        ;
+#endif
     if (context->verbose)
         show_context(context);
     if (context->words_count == 1) {
@@ -914,6 +923,63 @@ static void create_folder(command_context_t * context)
     }
 }
 
+static void rename_object(command_context_t * context)
+{
+    CURLcode res;
+    char * filename = NULL, * uuid, * mode;
+    object_type_t   type = Folder;
+    char request[512];
+
+    uuid = parse_uuid(context, context->words[0]);
+    mode = "Folder";
+    if (uuid == NULL) {
+        // Case of renaming active file, not a folder
+        // That means what single argument is the new name of active File, two arguments - folder ID and its new name
+        type = File;
+        uuid = context->last_object.uuid;
+        mode = "File";
+    }
+    filename = parse_filename(context, context->words[0], 0);
+    if (filename == NULL) {
+        fprintf(stderr, "'rename' command arguments error. Use ID and filename as arguments to 'reaname'\n");
+        return;
+    }
+
+    snprintf(request, sizeof(request), "%s/api/rp/v1/%s/%s/%s/Rename",
+        DEFAULT_SERVER,
+        GetDomainMode(context),
+        mode,
+        uuid);
+
+    char * post = alloca(CREATE_BUFF_SIZE);
+    snprintf(post, CREATE_BUFF_SIZE, "{ \"name\": \"%s\" }", filename);
+
+    struct curl_slist *headers = NULL;
+    headers = curl_slist_append(headers, "Content-Type: application/json");
+    headers = curl_slist_append(headers, "Accept: application/json");
+    curl_easy_setopt(context->curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(context->curl, CURLOPT_POSTFIELDS, post);
+    curl_easy_setopt(context->curl, CURLOPT_WRITEDATA, stdout);
+    curl_easy_setopt(context->curl, CURLOPT_WRITEFUNCTION, NULL);
+    curl_easy_setopt(context->curl, CURLOPT_CUSTOMREQUEST, "PUT");
+    curl_easy_setopt(context->curl, CURLOPT_URL, request);
+
+    res = curl_easy_perform(context->curl);
+    if (res != CURLE_OK)
+        fprintf(stderr, "curl_easy_perform() failed: %s\n",
+            curl_easy_strerror(res));
+
+    curl_slist_free_all(headers);
+    curl_easy_setopt(context->curl, CURLOPT_CUSTOMREQUEST, NULL);
+    curl_easy_setopt(context->curl, CURLOPT_HTTPHEADER, NULL);
+    curl_easy_setopt(context->curl, CURLOPT_POSTFIELDS, NULL);
+    curl_easy_setopt(context->curl, CURLOPT_POST, 0);
+
+    if (context->words_count == 1) {
+        next_command(context, context->words[0]);
+    }
+}
+
 static void show_information(command_context_t * context)
 {
     CURLcode res;
@@ -1069,6 +1135,7 @@ command_record_t    commands[] = {
     {"rm",      delete_remote_object, "delete file by object ID", NULL},
     {"mkdir",   create_folder, "creaate new folder", NULL},
     {"rmdir",   delete_remote_object, "delete non-empty folder by object ID", NULL },
+    {"rename",  rename_object, "rename folder, template, report, or export object by ID", HELP_RENAME},
     {"verbose", switch_verbosity, "toggle curl verbose mode ON/OFF", NULL},
     {"limit",   list_screen_limit, "show/set max count of items of 'ls' and 'search' commands", NULL},
     {"info",    show_information, "show various information", HELP_INFO},
@@ -1199,7 +1266,7 @@ static char * parse_uuid(command_context_t * context, char * input)
     for (counter = ID_SIZE; *ptr && counter; --counter, ++ptr) {
         if (isdigit(*ptr) || (*ptr >= 'a' && *ptr <= 'f'))
             continue;
-        fprintf(stderr, "Counter %d %s\n", counter, input);
+        fprintf(stderr, "Object ID format error %s\n", input);
         return NULL;
     }
     while (*ptr != '\0' && isspace(*ptr))

@@ -41,6 +41,13 @@
     "Пример использоания: file \"Мой отчёт.frx\"\n" \
     "Эта команда может использоваться в составном выражении."
 
+#define HELP_RENAME \
+    "Команда " HIGHLIGHT_ON "rename" HIGHLIGHT_OFF "\n\n" \
+    "исппользуется для перименованиия файлов и папок. Используются три формы:\n" \
+    "Переименования папки: " HIGHLIGHT_ON "rename ID newname\n" HIGHLIGHT_OFF\
+    "Переименование файла: " HIGHLIGHT_ON "use ID rename newname\n" HIGHLIGHT_OFF\
+    "Переименование файла: " HIGHLIGHT_ON "file filename rename newname\n" HIGHLIGHT_OFF
+
 #define HELP_INFO \
     "Команда info выводит 3 информационных блока - конфигурацию сервера, профиль и пользоватльские атрибуты.\n" 
 
