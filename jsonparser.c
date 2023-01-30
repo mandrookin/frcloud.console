@@ -169,6 +169,16 @@ static int read_frcloud_dir(const char *js, jsmntok_t *t, size_t count)
             //printf("Skip tags: %s\n", type);
             item += item->size + 1;
         }
+        
+        static char  debs[256];
+        get_string(js, item, debs, sizeof(debs));
+//        fprintf(stderr, "TYPE_DEF: %s\n", debs);
+        
+        if( json_text_compare(js, item, "parentId") !=0 ) {
+          item++;
+          get_string(js, item++, debs, sizeof(debs));
+//          fprintf(stderr, "parentId: %s\n", debs);
+        }
 
         if (!json_text_compare(js, item++, "type"))
             return -15;
@@ -184,6 +194,18 @@ static int read_frcloud_dir(const char *js, jsmntok_t *t, size_t count)
             return -16;
         get_string(js, item++, type, sizeof(type));
         dir.size = atoi(type);
+        
+        get_string(js, item, debs, sizeof(debs));
+//        fprintf(stderr, "STATUS_DEF: %s\n", debs);
+
+        if( json_text_compare(js, item, "subscriptionId") != 0) {
+           item++;
+          get_string(js, item++, debs, sizeof(debs));
+//          fprintf(stderr, "subscriptionId: %s\n", debs);
+           
+        }
+
+        
         if (!json_text_compare(js, item++, "status"))
             return -17;
         get_string(js, item++, type, sizeof(type));
@@ -277,7 +299,7 @@ int draw_json_ListFolderAndFiles(char *js, size_t jslen)
     jsmntok_t * tok = prepare_json(js, jslen, &count);
 
     if (tok != NULL) {
-        // dump(js, tok, count, 0, alloca(1024));
+//        dump(js, tok, count, 0, alloca(1024));
         status = read_frcloud_dir(js, tok, count);
         free(tok);
         if (status < 0)
@@ -326,6 +348,12 @@ int draw_json_Breadcrumbs(char *js, size_t jslen)
                 if (!json_text_compare(js, item++, "id"))
                     return -14;
                 get_string(js, item++, id, sizeof(id));
+
+          static char debs[128];
+          get_string(js, item, debs, sizeof(debs));
+          fprintf(stderr, "subscriptionId: %s\n", debs);
+
+
                 if (!json_text_compare(js, item++, "name"))
                     return -15;
                 get_string(js, item++, name, sizeof(name));
@@ -519,7 +547,7 @@ int json_SelectFile(char *js, size_t jslen, command_context_t * context)
         ++t;
         if (t->type != JSMN_ARRAY || t->size != 1) {
             status = -8;
-            //            printf("TYPE %d  SIZE %d %s\n", t->type, t->size, js);
+            printf("TYPE %d  SIZE %d %s\n", t->type, t->size, js);
             break;
         }
         ++t;

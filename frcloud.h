@@ -7,7 +7,10 @@
 // Peplace with suitable key file name
 #define KEY_FILE            "FastReport.Cloud.key"
 // FastReport cloud server address
-#define DEFAULT_SERVER      "https://fastreport.cloud"
+//#define DEFAULT_SERVER      "https://fastreport.cloud"
+#define DEFAULT_SERVER      "https://xn--80ab2acne.xn--e1aflibyb2b0b.xn--p1ai"
+#define DEBUG_DIRECTORY_JSON 0
+
 #define ID_SIZE 24
 
 // Undefine this to disable storing history to file

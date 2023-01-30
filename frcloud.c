@@ -6,6 +6,8 @@
 #include <string.h>
 #include <errno.h>
 
+/////  template file python.frx prepare as pdf export and get
+
 #include <readline/readline.h>
 #include <readline/history.h>
 
@@ -343,7 +345,7 @@ static int get_file_info(command_context_t * context, char * uuid)
         GetDomainMode(context),
         uuid);
 
-    /////printf("REQUEST: %s\n", request);
+//    printf("REQUEST: %s\n", request);
 
     json_request(context, request);
 
@@ -459,9 +461,11 @@ static void prepare_report(command_context_t * context)
     else {
 
         uuid = parse_uuid(context, context->words[0]);
-        if (uuid == NULL)
+//        fprintf(stderr, "\ncontext->words_count = %d\n%s\n%s\n\n", context->words_count, uuid, context->words[0]);
+        if (uuid == NULL) {
             uuid = context->last_object.uuid;
-        else if (context->words_count == 1) {
+        }
+        if (context->words_count == 1) {
             modifier = next = context->words[0];
             while (*next && !isspace(*next))
                 next++;
@@ -492,21 +496,31 @@ static void prepare_report(command_context_t * context)
                 } else {
                     context->words[0] = modifier;
                 }
-                printf(" *** NEXT: %s\n", next);
+//                printf(" *** NEXT: %s\n", next);
             }
             else {
                 context->words_count = 0;
                 context->words[0] = NULL;
             }
-            printf(" *** MODIFIER: %s\n", modifier);
+ //           printf(" *** TYPE: %d  MODIFIER: %s\n", type, modifier);
         }
     }
 
-    snprintf(request, 512, "%s/api/rp/v1/Templates/File/%s/Prepare",
-        DEFAULT_SERVER,
-        uuid);
+    struct curl_slist* headers = NULL;
+    if (type == Fpx)
+    {
+        snprintf(request, 512, "%s/api/rp/v1/Templates/File/%s/Prepare",
+            DEFAULT_SERVER,
+            uuid);
+    }
+    else 
+    {
+        snprintf(request, 512, "%s/api/rp/v1/Templates/File/%s/Export",
+            DEFAULT_SERVER,
+            uuid);
 
-    struct curl_slist *headers = NULL;
+    }
+
     headers = curl_slist_append(headers, "Content-Type: application/json-patch+json");
     curl_easy_setopt(context->curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(context->curl, CURLOPT_URL, request);
@@ -516,6 +530,8 @@ static void prepare_report(command_context_t * context)
 #define PREPARE_JSON_MAX_SIZE   1024 * 128
 
     char name_holder[256];
+    char* post = alloca(PREPARE_JSON_MAX_SIZE);
+
     if (context->last_object.name) {
         strcpy(name_holder, context->last_object.name);
         int len = strlen(name_holder);
@@ -523,19 +539,39 @@ static void prepare_report(command_context_t * context)
             if (strcmp(&name_holder[len - 4], ".frx") == 0)
                 name_holder[len - 4] = 0;
         }
-        strcat(name_holder, ".fpx");
     }
     else
     {
-        strcpy(name_holder, "unnamed.fpx");
+        strcpy(name_holder, "unnamed");
     }
-    //    printf("::: %s\n", name_holder);
 
-    char * post = alloca(PREPARE_JSON_MAX_SIZE);
-    int bytes = snprintf(post, PREPARE_JSON_MAX_SIZE,
-        "{ \"name\": \"%s\", \"parentFolderId\": \"%s\"}",
-        name_holder,
-        context->reports_current_folder);
+    if (type == Fpx)
+    {
+        strcat(name_holder, ".fpx");
+        //    printf("::: %s\n", name_holder);
+
+        int bytes = snprintf(post, PREPARE_JSON_MAX_SIZE,
+            "{ \"name\": \"%s\", \"parentFolderId\": \"%s\"}",
+            name_holder,
+            context->reports_current_folder);
+    }
+    else
+    {
+        snprintf(post, PREPARE_JSON_MAX_SIZE,
+            "{ "
+            "\"fileName\": \"%s.pdf\", "
+            //"\"folderId\": \"62989291935529d4237d78b9\", "
+            "\"format\": \"Pdf\" "
+            //    "\"exportParameters\" : { "
+            //                "\"additionalProp1\": {}, "
+            //                "\"additionalProp2\" : {}, "
+            //                "\"additionalProp3\" : {} "
+            //    " }"
+            " }",
+            name_holder
+        );
+//        fprintf(stderr, "DEBUG: %s\n", post);
+    }
 
     context->received_json_size = 0;
     context->json_chunks_head = NULL;
@@ -561,7 +597,8 @@ static void prepare_report(command_context_t * context)
     }
     char * json_stream = alloca(context->received_json_size + 1);
     json_response(context, json_stream);
-    // printf("--- %s\n", json_stream);
+//    printf("--- %s\n", json_stream);
+
     int status = json_FileInfo(json_stream, context->received_json_size, context);
     if ( status != 0) {
         fprintf(stderr, "Uparsed server response detected on preapre report. Error code: %d\n", status);
@@ -571,7 +608,7 @@ static void prepare_report(command_context_t * context)
         show_context(context);
 
     namespace_t saved_space = context->session_namespace;
-    context->session_namespace = Reports;
+    context->session_namespace = type == Fpx ? Reports : Exports;
 
     while (strcmp(context->last_object.status, "InQueue") == 0 ||
         strcmp(context->last_object.status, "InProcess") == 0) {
@@ -1334,6 +1371,8 @@ static void user_interface(command_context_t * context)
     context->take_count = 16;
     do {
         context->words_count = 0;
+        for (int i = 0; i < 8; i++)
+            context->words[i] = 0;
         context->command = readline_gets(modes[context->session_namespace]);
         if (context->command == NULL) {
             stop = 1;
